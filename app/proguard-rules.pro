@@ -55,3 +55,8 @@
 
 # SMBJ-RPC
 -dontwarn java.rmi.UnmarshalException
+
+# Run-script (fork patch): ShizukuScriptRunner calls this private method reflectively.
+-keepclassmembers class rikka.shizuku.Shizuku {
+    private static rikka.shizuku.ShizukuRemoteProcess newProcess(java.lang.String[], java.lang.String[], java.lang.String);
+}

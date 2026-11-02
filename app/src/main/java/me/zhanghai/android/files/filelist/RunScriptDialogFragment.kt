@@ -24,35 +24,41 @@ class RunScriptDialogFragment : AppCompatDialogFragment() {
         get() = requireParentFragment() as Listener
 
     override fun onCreateDialog(savedInstanceState: Bundle?): Dialog {
-        val items = arrayOf(
-            getString(R.string.file_run_script_run),
-            getString(R.string.file_run_script_dry),
-            getString(R.string.file_run_script_open_as_text)
-        )
+        // Normal "run as this app" only works on real Linux paths; SAF paths (microSD on old
+        // Android) can only be run through Shizuku, via the translated raw path.
+        val labels = mutableListOf<String>()
+        val actions = mutableListOf<() -> Unit>()
+        if (args.isLinuxPath) {
+            labels += getString(R.string.file_run_script_run)
+            actions += { listener.runScript(args.file, args.rawPath, false, false) }
+            labels += getString(R.string.file_run_script_dry)
+            actions += { listener.runScript(args.file, args.rawPath, true, false) }
+        }
+        labels += getString(R.string.file_run_script_run_shizuku)
+        actions += { listener.runScript(args.file, args.rawPath, false, true) }
+        labels += getString(R.string.file_run_script_dry_shizuku)
+        actions += { listener.runScript(args.file, args.rawPath, true, true) }
+        labels += getString(R.string.file_run_script_open_as_text)
+        actions += { listener.openScriptAsText(args.file) }
         return MaterialAlertDialogBuilder(requireContext(), theme)
             .setTitle(args.file.name)
-            .setItems(items) { _, which ->
-                when (which) {
-                    0 -> listener.runScript(args.file, false)
-                    1 -> listener.runScript(args.file, true)
-                    else -> listener.openScriptAsText(args.file)
-                }
-            }
+            .setItems(labels.toTypedArray()) { _, which -> actions[which]() }
             .setNegativeButton(android.R.string.cancel, null)
             .create()
     }
 
     companion object {
-        fun show(file: FileItem, fragment: Fragment) {
-            RunScriptDialogFragment().putArgs(Args(file)).show(fragment)
+        fun show(file: FileItem, rawPath: String, isLinuxPath: Boolean, fragment: Fragment) {
+            RunScriptDialogFragment().putArgs(Args(file, rawPath, isLinuxPath)).show(fragment)
         }
     }
 
     @Parcelize
-    class Args(val file: FileItem) : ParcelableArgs
+    class Args(val file: FileItem, val rawPath: String, val isLinuxPath: Boolean) :
+        ParcelableArgs
 
     interface Listener {
-        fun runScript(file: FileItem, dryRun: Boolean)
+        fun runScript(file: FileItem, rawPath: String, dryRun: Boolean, viaShizuku: Boolean)
         fun openScriptAsText(file: FileItem)
     }
 }

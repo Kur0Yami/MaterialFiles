@@ -1220,15 +1220,27 @@ class FileListFragment : Fragment(), BreadcrumbLayout.Listener, FileListAdapter.
             navigateTo(file.listablePath)
             return
         }
-        if (file.path.isLinuxPath && file.name.endsWith(".sh", ignoreCase = true)) {
-            RunScriptDialogFragment.show(file, this)
-            return
+        if (file.name.endsWith(".sh", ignoreCase = true)) {
+            val rawPath = file.path.toScriptRawPath()
+            if (rawPath != null) {
+                RunScriptDialogFragment.show(file, rawPath, file.path.isLinuxPath, this)
+                return
+            }
         }
         openFileWithIntent(file, false)
     }
 
-    override fun runScript(file: FileItem, dryRun: Boolean) {
-        ScriptOutputDialogFragment.show(file.path.toFile().path, dryRun, this)
+    override fun runScript(
+        file: FileItem,
+        rawPath: String,
+        dryRun: Boolean,
+        viaShizuku: Boolean
+    ) {
+        if (viaShizuku && !ShizukuScriptRunner.isAvailable()) {
+            showToast(R.string.file_run_script_shizuku_unavailable)
+            return
+        }
+        ScriptOutputDialogFragment.show(rawPath, dryRun, viaShizuku, this)
     }
 
     override fun openScriptAsText(file: FileItem) {

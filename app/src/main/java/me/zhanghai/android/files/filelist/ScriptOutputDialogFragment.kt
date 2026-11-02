@@ -1,6 +1,7 @@
 /*
  * Run-script support (fork patch).
- * Runs `sh <script> [-d]` with the script's folder as working directory and streams the output.
+ * Runs `sh <script> [-d]` with the script's folder as working directory and streams the output,
+ * either as this app or (viaShizuku) as the Shizuku shell user.
  * The process lives in a ViewModel so rotating the screen never re-runs the script.
  */
 
@@ -46,12 +47,14 @@ class ScriptOutputDialogFragment : AppCompatDialogFragment() {
             setPadding(padding, padding, padding, padding)
         }
         val scrollView = ScrollView(context).apply { addView(textView) }
-        viewModel.start(args.path, args.dryRun)
+        viewModel.start(args.path, args.dryRun, args.viaShizuku)
         viewModel.outputLiveData.observe(this) { output ->
             textView.text = output
             scrollView.post { scrollView.fullScroll(ScrollView.FOCUS_DOWN) }
         }
-        val title = File(args.path).name + if (args.dryRun) " (dry run)" else ""
+        val title = File(args.path).name +
+            (if (args.dryRun) " (dry run)" else "") +
+            (if (args.viaShizuku) " [Shizuku]" else "")
         return MaterialAlertDialogBuilder(context, theme)
             .setTitle(title)
             .setView(scrollView)
@@ -69,13 +72,13 @@ class ScriptOutputDialogFragment : AppCompatDialogFragment() {
     }
 
     companion object {
-        fun show(path: String, dryRun: Boolean, fragment: Fragment) {
-            ScriptOutputDialogFragment().putArgs(Args(path, dryRun)).show(fragment)
+        fun show(path: String, dryRun: Boolean, viaShizuku: Boolean, fragment: Fragment) {
+            ScriptOutputDialogFragment().putArgs(Args(path, dryRun, viaShizuku)).show(fragment)
         }
     }
 
     @Parcelize
-    class Args(val path: String, val dryRun: Boolean) : ParcelableArgs
+    class Args(val path: String, val dryRun: Boolean, val viaShizuku: Boolean) : ParcelableArgs
 
     class ScriptViewModel : ViewModel() {
         val outputLiveData = MutableLiveData("")
@@ -87,18 +90,25 @@ class ScriptOutputDialogFragment : AppCompatDialogFragment() {
         private val refreshPending = AtomicBoolean(false)
 
         @Synchronized
-        fun start(path: String, dryRun: Boolean) {
+        fun start(path: String, dryRun: Boolean, viaShizuku: Boolean) {
             if (started) return
             started = true
             Thread {
                 try {
                     val script = File(path)
-                    val command = mutableListOf("sh", script.path)
-                    if (dryRun) command += "-d"
-                    val p = ProcessBuilder(command)
-                        .directory(script.parentFile)
-                        .redirectErrorStream(true)
-                        .start()
+                    val p = if (viaShizuku) {
+                        check(ShizukuScriptRunner.ensurePermission()) {
+                            "Shizuku permission isn't granted"
+                        }
+                        ShizukuScriptRunner.start(script.path, dryRun, script.parentFile?.path)
+                    } else {
+                        val command = mutableListOf("sh", script.path)
+                        if (dryRun) command += "-d"
+                        ProcessBuilder(command)
+                            .directory(script.parentFile)
+                            .redirectErrorStream(true)
+                            .start()
+                    }
                     process = p
                     p.inputStream.bufferedReader().use { reader ->
                         val chunk = CharArray(1024)
