@@ -1,0 +1,29 @@
+name: Build APK arm64
+
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: gradle
+      - name: Batasi ke arm64-v8a
+        run: |
+          sed -i "0,/defaultConfig {/s//defaultConfig {\n        ndk { abiFilters 'arm64-v8a' }/" app/build.gradle
+          grep -n "abiFilters" app/build.gradle
+      - name: Build debug APK
+        run: chmod +x gradlew && ./gradlew assembleDebug --no-daemon
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MaterialFiles-arm64-debug
+          path: app/build/outputs/apk/debug/*.apk
+          retention-days: 14

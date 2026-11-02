@@ -134,6 +134,7 @@ import me.zhanghai.android.files.viewer.image.ImageViewerActivity
 
 class FileListFragment : Fragment(), BreadcrumbLayout.Listener, FileListAdapter.Listener,
     ConfirmReplaceFileDialogFragment.Listener, OpenApkDialogFragment.Listener,
+    RunScriptDialogFragment.Listener,
     ConfirmDeleteFilesDialogFragment.Listener, CreateArchiveDialogFragment.Listener,
     RenameFileDialogFragment.Listener, CreateFileDialogFragment.Listener,
     CreateDirectoryDialogFragment.Listener, NavigateToPathDialogFragment.Listener,
@@ -1219,6 +1220,18 @@ class FileListFragment : Fragment(), BreadcrumbLayout.Listener, FileListAdapter.
             navigateTo(file.listablePath)
             return
         }
+        if (file.path.isLinuxPath && file.name.endsWith(".sh", ignoreCase = true)) {
+            RunScriptDialogFragment.show(file, this)
+            return
+        }
+        openFileWithIntent(file, false)
+    }
+
+    override fun runScript(file: FileItem, dryRun: Boolean) {
+        ScriptOutputDialogFragment.show(file.path.toFile().path, dryRun, this)
+    }
+
+    override fun openScriptAsText(file: FileItem) {
         openFileWithIntent(file, false)
     }
 
