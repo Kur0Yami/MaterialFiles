@@ -1,7 +1,7 @@
 /*
  * Run-script support (fork patch).
  * Runs `sh <script> [-d]` with the script's folder as working directory and streams the output,
- * either as this app or (viaShizuku) as the Shizuku shell user.
+ * as this app, as root (su), or as the Shizuku shell user.
  * The process lives in a ViewModel so rotating the screen never re-runs the script.
  */
 
@@ -47,14 +47,18 @@ class ScriptOutputDialogFragment : AppCompatDialogFragment() {
             setPadding(padding, padding, padding, padding)
         }
         val scrollView = ScrollView(context).apply { addView(textView) }
-        viewModel.start(args.path, args.dryRun, args.viaShizuku)
+        viewModel.start(args.path, args.dryRun, args.method)
         viewModel.outputLiveData.observe(this) { output ->
             textView.text = output
             scrollView.post { scrollView.fullScroll(ScrollView.FOCUS_DOWN) }
         }
         val title = File(args.path).name +
             (if (args.dryRun) " (dry run)" else "") +
-            (if (args.viaShizuku) " [Shizuku]" else "")
+            when (args.method) {
+                ScriptRunMethod.APP -> ""
+                ScriptRunMethod.ROOT -> " [root]"
+                ScriptRunMethod.SHIZUKU -> " [Shizuku]"
+            }
         return MaterialAlertDialogBuilder(context, theme)
             .setTitle(title)
             .setView(scrollView)
@@ -72,13 +76,13 @@ class ScriptOutputDialogFragment : AppCompatDialogFragment() {
     }
 
     companion object {
-        fun show(path: String, dryRun: Boolean, viaShizuku: Boolean, fragment: Fragment) {
-            ScriptOutputDialogFragment().putArgs(Args(path, dryRun, viaShizuku)).show(fragment)
+        fun show(path: String, dryRun: Boolean, method: ScriptRunMethod, fragment: Fragment) {
+            ScriptOutputDialogFragment().putArgs(Args(path, dryRun, method)).show(fragment)
         }
     }
 
     @Parcelize
-    class Args(val path: String, val dryRun: Boolean, val viaShizuku: Boolean) : ParcelableArgs
+    class Args(val path: String, val dryRun: Boolean, val method: ScriptRunMethod) : ParcelableArgs
 
     class ScriptViewModel : ViewModel() {
         val outputLiveData = MutableLiveData("")
@@ -90,24 +94,29 @@ class ScriptOutputDialogFragment : AppCompatDialogFragment() {
         private val refreshPending = AtomicBoolean(false)
 
         @Synchronized
-        fun start(path: String, dryRun: Boolean, viaShizuku: Boolean) {
+        fun start(path: String, dryRun: Boolean, method: ScriptRunMethod) {
             if (started) return
             started = true
             Thread {
                 try {
                     val script = File(path)
-                    val p = if (viaShizuku) {
-                        check(ShizukuScriptRunner.ensurePermission()) {
-                            "Shizuku permission isn't granted"
+                    val p = when (method) {
+                        ScriptRunMethod.SHIZUKU -> {
+                            check(ShizukuScriptRunner.ensurePermission()) {
+                                "Shizuku permission isn't granted"
+                            }
+                            ShizukuScriptRunner.start(script.path, dryRun, script.parentFile?.path)
                         }
-                        ShizukuScriptRunner.start(script.path, dryRun, script.parentFile?.path)
-                    } else {
-                        val command = mutableListOf("sh", script.path)
-                        if (dryRun) command += "-d"
-                        ProcessBuilder(command)
-                            .directory(script.parentFile)
-                            .redirectErrorStream(true)
-                            .start()
+                        ScriptRunMethod.ROOT ->
+                            RootScriptRunner.start(script.path, dryRun, script.parentFile?.path)
+                        ScriptRunMethod.APP -> {
+                            val command = mutableListOf("sh", script.path)
+                            if (dryRun) command += "-d"
+                            ProcessBuilder(command)
+                                .directory(script.parentFile)
+                                .redirectErrorStream(true)
+                                .start()
+                        }
                     }
                     process = p
                     p.inputStream.bufferedReader().use { reader ->

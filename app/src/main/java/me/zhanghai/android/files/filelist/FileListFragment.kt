@@ -1275,13 +1275,20 @@ class FileListFragment : Fragment(), BreadcrumbLayout.Listener, FileListAdapter.
         file: FileItem,
         rawPath: String,
         dryRun: Boolean,
-        viaShizuku: Boolean
+        method: ScriptRunMethod
     ) {
-        if (viaShizuku && !ShizukuScriptRunner.isAvailable()) {
-            showToast(R.string.file_run_script_shizuku_unavailable)
-            return
+        when (method) {
+            ScriptRunMethod.APP -> {}
+            ScriptRunMethod.ROOT -> if (!RootScriptRunner.isAvailable()) {
+                showToast(R.string.file_run_script_root_unavailable)
+                return
+            }
+            ScriptRunMethod.SHIZUKU -> if (!ShizukuScriptRunner.isAvailable()) {
+                showToast(R.string.file_run_script_shizuku_unavailable)
+                return
+            }
         }
-        ScriptOutputDialogFragment.show(rawPath, dryRun, viaShizuku, this)
+        ScriptOutputDialogFragment.show(rawPath, dryRun, method, this)
     }
 
     override fun openScriptAsText(file: FileItem) {
@@ -1344,7 +1351,7 @@ class FileListFragment : Fragment(), BreadcrumbLayout.Listener, FileListAdapter.
                                 .putArgs(OpenFileAsDialogFragment.Args(path))
                         )
                     } else {
-                        it
+                        it.routeToInternalViewer(mimeType)
                     }
                 }
             startActivitySafe(intent)

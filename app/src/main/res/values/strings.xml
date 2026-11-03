@@ -227,6 +227,9 @@
     <string name="file_run_script_dry">Dry run (-d, moves nothing)</string>
     <string name="file_run_script_run_shizuku">Run via Shizuku (shell, may move or delete files)</string>
     <string name="file_run_script_dry_shizuku">Dry run via Shizuku (-d, moves nothing)</string>
+    <string name="file_run_script_run_root">Run via root (su, may move or delete files)</string>
+    <string name="file_run_script_dry_root">Dry run via root (-d, moves nothing)</string>
+    <string name="file_run_script_root_unavailable">Root isn\'t available</string>
     <string name="file_run_script_shizuku_unavailable">Shizuku isn\'t running</string>
     <string name="file_run_script_open_as_text">Open as text</string>
     <string name="file_run_script_stop">Stop</string>

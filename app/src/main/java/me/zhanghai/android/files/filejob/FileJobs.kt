@@ -89,6 +89,7 @@ import me.zhanghai.android.files.provider.linux.isLinuxPath
 import me.zhanghai.android.files.util.asFileName
 import me.zhanghai.android.files.util.createInstallPackageIntent
 import me.zhanghai.android.files.util.createIntent
+import me.zhanghai.android.files.filelist.routeToInternalViewer
 import me.zhanghai.android.files.util.createViewIntent
 import me.zhanghai.android.files.util.extraPath
 import me.zhanghai.android.files.util.getQuantityString
@@ -1490,7 +1491,7 @@ class OpenFileJob(
                                 .putArgs(OpenFileAsDialogFragment.Args(file))
                         )
                     } else {
-                        it
+                        it.routeToInternalViewer(mimeType)
                     }
                 }
         }

@@ -24,20 +24,22 @@ class RunScriptDialogFragment : AppCompatDialogFragment() {
         get() = requireParentFragment() as Listener
 
     override fun onCreateDialog(savedInstanceState: Bundle?): Dialog {
-        // Normal "run as this app" only works on real Linux paths; SAF paths (microSD on old
-        // Android) can only be run through Shizuku, via the translated raw path.
         val labels = mutableListOf<String>()
         val actions = mutableListOf<() -> Unit>()
-        if (args.isLinuxPath) {
-            labels += getString(R.string.file_run_script_run)
-            actions += { listener.runScript(args.file, args.rawPath, false, false) }
-            labels += getString(R.string.file_run_script_dry)
-            actions += { listener.runScript(args.file, args.rawPath, true, false) }
+        fun addRun(labelRes: Int, dryRun: Boolean, method: ScriptRunMethod) {
+            labels += getString(labelRes)
+            actions += { listener.runScript(args.file, args.rawPath, dryRun, method) }
         }
-        labels += getString(R.string.file_run_script_run_shizuku)
-        actions += { listener.runScript(args.file, args.rawPath, false, true) }
-        labels += getString(R.string.file_run_script_dry_shizuku)
-        actions += { listener.runScript(args.file, args.rawPath, true, true) }
+        // Normal "run as this app" only works on real Linux paths; SAF paths (microSD on old
+        // Android) can only be run through Shizuku, via the translated raw path.
+        if (args.isLinuxPath) {
+            addRun(R.string.file_run_script_run, false, ScriptRunMethod.APP)
+            addRun(R.string.file_run_script_dry, true, ScriptRunMethod.APP)
+        }
+        addRun(R.string.file_run_script_run_root, false, ScriptRunMethod.ROOT)
+        addRun(R.string.file_run_script_dry_root, true, ScriptRunMethod.ROOT)
+        addRun(R.string.file_run_script_run_shizuku, false, ScriptRunMethod.SHIZUKU)
+        addRun(R.string.file_run_script_dry_shizuku, true, ScriptRunMethod.SHIZUKU)
         labels += getString(R.string.file_run_script_open_as_text)
         actions += { listener.openScriptAsText(args.file) }
         return MaterialAlertDialogBuilder(requireContext(), theme)
@@ -58,7 +60,7 @@ class RunScriptDialogFragment : AppCompatDialogFragment() {
         ParcelableArgs
 
     interface Listener {
-        fun runScript(file: FileItem, rawPath: String, dryRun: Boolean, viaShizuku: Boolean)
+        fun runScript(file: FileItem, rawPath: String, dryRun: Boolean, method: ScriptRunMethod)
         fun openScriptAsText(file: FileItem)
     }
 }
