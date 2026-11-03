@@ -6,8 +6,14 @@
 
 package me.zhanghai.android.files.filelist
 
+import me.zhanghai.android.files.file.MimeType
 import me.zhanghai.android.files.provider.common.matchesSearchWords
 import me.zhanghai.android.files.provider.common.splitSearchQuery
+
+/** Quick type chips (fork patch). */
+enum class FileTypeFilter {
+    ALL, FOLDERS, IMAGES, VIDEOS, AUDIO
+}
 
 data class FileFilterSpec(
     val query: String = "",
@@ -15,17 +21,21 @@ data class FileFilterSpec(
     val subfolders: Boolean = false,
     /** Inclusive bounds in bytes, or -1 for "no bound". */
     val minSize: Long = -1,
-    val maxSize: Long = -1
+    val maxSize: Long = -1,
+    val type: FileTypeFilter = FileTypeFilter.ALL
 ) {
     val hasSize: Boolean
         get() = minSize >= 0 || maxSize >= 0
 
+    val hasType: Boolean
+        get() = type != FileTypeFilter.ALL
+
     /** Plain words only: the provider can do the name matching by itself (fast path). */
     val isPlain: Boolean
-        get() = !regex && !hasSize
+        get() = !regex && !hasSize && !hasType
 
     val isActive: Boolean
-        get() = query.isNotBlank() || hasSize
+        get() = query.isNotBlank() || hasSize || hasType
 
     private val words: List<String> by lazy { splitSearchQuery(query) }
 
@@ -44,6 +54,14 @@ data class FileFilterSpec(
         query.isBlank() -> true
         regex -> pattern?.containsMatchIn(name) ?: false
         else -> matchesSearchWords(name, words)
+    }
+
+    fun matchesType(isDirectory: Boolean, mimeType: MimeType): Boolean = when (type) {
+        FileTypeFilter.ALL -> true
+        FileTypeFilter.FOLDERS -> isDirectory
+        FileTypeFilter.IMAGES -> !isDirectory && mimeType.type == "image"
+        FileTypeFilter.VIDEOS -> !isDirectory && mimeType.type == "video"
+        FileTypeFilter.AUDIO -> !isDirectory && mimeType.type == "audio"
     }
 
     /** Folders have no meaningful size, so any size bound excludes them. */

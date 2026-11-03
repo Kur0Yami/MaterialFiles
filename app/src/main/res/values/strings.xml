@@ -242,6 +242,11 @@
     <string name="file_list_filter_size_max">Max size</string>
     <string name="file_list_filter_apply">Apply</string>
     <string name="file_list_filter_reset">Reset</string>
+    <string name="file_list_filter_type_all">All</string>
+    <string name="file_list_filter_type_folders">Folders</string>
+    <string name="file_list_filter_type_images">Images</string>
+    <string name="file_list_filter_type_videos">Videos</string>
+    <string name="file_list_filter_type_audio">Audio</string>
     <string name="file_list_select_action_batch_rename">Batch rename</string>
     <string name="batch_rename_title">Batch rename (%1$d files)</string>
     <string name="batch_rename_pattern_hint">New name</string>
@@ -838,4 +843,8 @@
 
     <string name="shortcut_downloads_title" translatable="false">@string/navigation_standard_directory_downloads</string>
     <string name="shortcut_ftp_server_title" translatable="false">@string/ftp_server_title</string>
+    <string name="file_run_script_root_confirm_title">Run as root?</string>
+    <string name="file_run_script_root_confirm_message">This script will run with full root access and can change or delete anything on the device. Only run scripts you trust.</string>
+    <string name="file_run_script_root_confirm_message_dry">This dry run will still start the script with root access. Only run scripts you trust.</string>
+    <string name="file_run_script_root_confirm_run">Run as root</string>
 </resources>

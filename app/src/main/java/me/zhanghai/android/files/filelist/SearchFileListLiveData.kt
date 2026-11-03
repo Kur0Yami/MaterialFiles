@@ -54,6 +54,9 @@ class SearchFileListLiveData(
                             // TODO: Support file without information.
                             continue
                         }
+                        if (!filter.matchesType(fileItem.attributes.isDirectory, fileItem.mimeType)) {
+                            continue
+                        }
                         if (!filter.matchesSize(
                                 fileItem.attributes.isDirectory, fileItem.attributes.size()
                             )

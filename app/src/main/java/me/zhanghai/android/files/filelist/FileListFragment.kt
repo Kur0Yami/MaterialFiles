@@ -236,6 +236,7 @@ class FileListFragment : Fragment(), BreadcrumbLayout.Listener, FileListAdapter.
         }
         binding.appBarLayout.syncBackgroundColorTo(binding.overlayToolbar)
         binding.breadcrumbLayout.setListener(this)
+        setupTypeFilterChips()
         if (!(activity.hasSw600Dp && activity.isOrientationLandscape)) {
             binding.swipeRefreshLayout.setProgressViewEndTarget(
                 true, binding.swipeRefreshLayout.progressViewEndOffset
@@ -398,6 +399,7 @@ class FileListFragment : Fragment(), BreadcrumbLayout.Listener, FileListAdapter.
         // resets the query.
         searchView.setOnSearchClickListener {
             viewModel.isSearchViewExpanded = true
+            updateTypeFilterChips()
             searchView.setQuery(viewModel.searchViewQuery, false)
         }
         // SearchView.OnCloseListener.onClose() is not always called.
@@ -410,6 +412,7 @@ class FileListFragment : Fragment(), BreadcrumbLayout.Listener, FileListAdapter.
                 viewModel.resetFilter()
                 viewModel.stopSearching()
                 updateAdapterFileList()
+                updateTypeFilterChips()
                 return true
             }
         })
@@ -432,7 +435,46 @@ class FileListFragment : Fragment(), BreadcrumbLayout.Listener, FileListAdapter.
         })
         if (viewModel.isSearchViewExpanded) {
             menuBinding.searchItem.expandActionView()
+            updateTypeFilterChips()
         }
+    }
+
+    private fun setupTypeFilterChips() {
+        val chips = mapOf(
+            R.id.typeChipAll to FileTypeFilter.ALL,
+            R.id.typeChipFolders to FileTypeFilter.FOLDERS,
+            R.id.typeChipImages to FileTypeFilter.IMAGES,
+            R.id.typeChipVideos to FileTypeFilter.VIDEOS,
+            R.id.typeChipAudio to FileTypeFilter.AUDIO
+        )
+        for ((id, type) in chips) {
+            binding.appBarLayout.findViewById<View>(id).setOnClickListener {
+                viewModel.filterType = type
+                updateTypeFilterChips()
+                applyFilterChange()
+            }
+        }
+    }
+
+    private fun updateTypeFilterChips() {
+        if (!this::binding.isInitialized) {
+            return
+        }
+        val expanded = viewModel.isSearchViewExpanded
+        binding.appBarLayout.findViewById<View>(R.id.typeFilterScroll).isVisible = expanded
+        if (!expanded) {
+            return
+        }
+        val checkedId = when (viewModel.filterType) {
+            FileTypeFilter.ALL -> R.id.typeChipAll
+            FileTypeFilter.FOLDERS -> R.id.typeChipFolders
+            FileTypeFilter.IMAGES -> R.id.typeChipImages
+            FileTypeFilter.VIDEOS -> R.id.typeChipVideos
+            FileTypeFilter.AUDIO -> R.id.typeChipAudio
+        }
+        binding.appBarLayout.findViewById<com.google.android.material.chip.ChipGroup>(
+            R.id.typeFilterChipGroup
+        ).check(checkedId)
     }
 
     private fun collapseSearchView() {
@@ -778,6 +820,7 @@ class FileListFragment : Fragment(), BreadcrumbLayout.Listener, FileListAdapter.
             if (filter.isActive && !isSearching) {
                 result = result.filter {
                     filter.matchesName(it.name) &&
+                        filter.matchesType(it.attributes.isDirectory, it.mimeType) &&
                         filter.matchesSize(it.attributes.isDirectory, it.attributes.size())
                 }
             }

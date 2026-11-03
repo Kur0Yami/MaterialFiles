@@ -102,9 +102,11 @@ class FileListViewModel : ViewModel() {
     var filterSubfolders: Boolean = false
     var filterMinSize: Long = -1
     var filterMaxSize: Long = -1
+    var filterType: FileTypeFilter = FileTypeFilter.ALL
 
-    fun currentFilter() =
-        FileFilterSpec(filterQuery, filterRegex, filterSubfolders, filterMinSize, filterMaxSize)
+    fun currentFilter() = FileFilterSpec(
+        filterQuery, filterRegex, filterSubfolders, filterMinSize, filterMaxSize, filterType
+    )
 
     fun resetFilter() {
         filterQuery = ""
@@ -112,6 +114,7 @@ class FileListViewModel : ViewModel() {
         filterSubfolders = false
         filterMinSize = -1
         filterMaxSize = -1
+        filterType = FileTypeFilter.ALL
     }
 
     fun searchFiltered(filter: FileFilterSpec) {

@@ -53,5 +53,62 @@
             android:layout_height="wrap_content"
             android:paddingStart="@dimen/content_start_margin_minus_12dp"
             android:paddingEnd="@dimen/screen_edge_margin_minus_12dp" />
+
+        <!-- Quick type filter (fork patch), shown while the search view is expanded. -->
+        <HorizontalScrollView
+            android:id="@+id/typeFilterScroll"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:clipToPadding="false"
+            android:paddingStart="@dimen/content_start_margin_minus_12dp"
+            android:paddingEnd="@dimen/screen_edge_margin_minus_12dp"
+            android:paddingBottom="8dp"
+            android:scrollbars="none"
+            android:visibility="gone">
+
+            <com.google.android.material.chip.ChipGroup
+                android:id="@+id/typeFilterChipGroup"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:paddingStart="12dp"
+                app:chipSpacingHorizontal="8dp"
+                app:singleSelection="true">
+
+                <com.google.android.material.chip.Chip
+                    android:id="@+id/typeChipAll"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:checkable="true"
+                    android:text="@string/file_list_filter_type_all" />
+
+                <com.google.android.material.chip.Chip
+                    android:id="@+id/typeChipFolders"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:checkable="true"
+                    android:text="@string/file_list_filter_type_folders" />
+
+                <com.google.android.material.chip.Chip
+                    android:id="@+id/typeChipImages"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:checkable="true"
+                    android:text="@string/file_list_filter_type_images" />
+
+                <com.google.android.material.chip.Chip
+                    android:id="@+id/typeChipVideos"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:checkable="true"
+                    android:text="@string/file_list_filter_type_videos" />
+
+                <com.google.android.material.chip.Chip
+                    android:id="@+id/typeChipAudio"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:checkable="true"
+                    android:text="@string/file_list_filter_type_audio" />
+            </com.google.android.material.chip.ChipGroup>
+        </HorizontalScrollView>
     </me.zhanghai.android.files.ui.CoordinatorAppBarLayout>
 </merge>

@@ -89,6 +89,7 @@ class ScriptOutputDialogFragment : AppCompatDialogFragment() {
         val runningLiveData = MutableLiveData(true)
         private val buffer = StringBuilder()
         private var process: Process? = null
+        private var rootPidFile: String? = null
         private var started = false
         private val mainHandler = Handler(Looper.getMainLooper())
         private val refreshPending = AtomicBoolean(false)
@@ -107,8 +108,13 @@ class ScriptOutputDialogFragment : AppCompatDialogFragment() {
                             }
                             ShizukuScriptRunner.start(script.path, dryRun, script.parentFile?.path)
                         }
-                        ScriptRunMethod.ROOT ->
-                            RootScriptRunner.start(script.path, dryRun, script.parentFile?.path)
+                        ScriptRunMethod.ROOT -> {
+                            val run = RootScriptRunner.start(
+                                script.path, dryRun, script.parentFile?.path
+                            )
+                            rootPidFile = run.pidFile
+                            run.process
+                        }
                         ScriptRunMethod.APP -> {
                             val command = mutableListOf("sh", script.path)
                             if (dryRun) command += "-d"
@@ -157,11 +163,21 @@ class ScriptOutputDialogFragment : AppCompatDialogFragment() {
 
         fun stop() {
             append("\n[stopped by user]\n")
-            process?.destroy()
+            terminate()
         }
 
         override fun onCleared() {
             // Closing the dialog for good must not leave a script running in the background.
+            terminate()
+        }
+
+        private fun terminate() {
+            // Killing only the su client leaves a root script running, so a root run must
+            // signal its whole process group. This runs off the main thread (it spawns su).
+            val pidFile = rootPidFile
+            if (pidFile != null) {
+                Thread { RootScriptRunner.killGroup(pidFile) }.start()
+            }
             process?.destroy()
         }
 

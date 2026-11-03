@@ -28,7 +28,12 @@ class RunScriptDialogFragment : AppCompatDialogFragment() {
         val actions = mutableListOf<() -> Unit>()
         fun addRun(labelRes: Int, dryRun: Boolean, method: ScriptRunMethod) {
             labels += getString(labelRes)
-            actions += { listener.runScript(args.file, args.rawPath, dryRun, method) }
+            val run = { listener.runScript(args.file, args.rawPath, dryRun, method) }
+            actions += if (method == ScriptRunMethod.ROOT) {
+                { confirmRoot(dryRun, run) }
+            } else {
+                run
+            }
         }
         // Normal "run as this app" only works on real Linux paths; SAF paths (microSD on old
         // Android) can only be run through Shizuku, via the translated raw path.
@@ -47,6 +52,18 @@ class RunScriptDialogFragment : AppCompatDialogFragment() {
             .setItems(labels.toTypedArray()) { _, which -> actions[which]() }
             .setNegativeButton(android.R.string.cancel, null)
             .create()
+    }
+
+    private fun confirmRoot(dryRun: Boolean, run: () -> Unit) {
+        MaterialAlertDialogBuilder(requireContext(), theme)
+            .setTitle(R.string.file_run_script_root_confirm_title)
+            .setMessage(
+                if (dryRun) R.string.file_run_script_root_confirm_message_dry
+                else R.string.file_run_script_root_confirm_message
+            )
+            .setPositiveButton(R.string.file_run_script_root_confirm_run) { _, _ -> run() }
+            .setNegativeButton(android.R.string.cancel, null)
+            .show()
     }
 
     companion object {
