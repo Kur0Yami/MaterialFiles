@@ -72,6 +72,16 @@ android {
         warning 'InvalidPackage', 'MissingTranslation'
     }
     buildTypes {
+        // Debug builds get their own package, so they install next to the official app.
+        debug {
+            applicationIdSuffix '.fork'
+            // The same release-style keystore for every CI build (set by the workflow), so each
+            // build can update the previous one. Local builds without STORE_FILE use the default key.
+            signingConfig (System.getenv('STORE_FILE') ? signingConfigs.release : signingConfigs.debug)
+            // defaultConfig's authorities are fixed to the official package; override them here.
+            resValue 'string', 'app_provider_authority', 'me.zhanghai.android.files.fork.app_provider'
+            resValue 'string', 'file_provider_authority', 'me.zhanghai.android.files.fork.file_provider'
+        }
         release {
             minifyEnabled true
             shrinkResources true
