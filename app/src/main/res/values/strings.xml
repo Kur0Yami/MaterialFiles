@@ -316,6 +316,9 @@
     <string name="file_list_action_view_sort">View and sort</string>
     <string name="file_list_action_view_list">List</string>
     <string name="file_list_action_view_grid">Grid</string>
+    <string name="file_list_action_view_compact">Compact</string>
+    <string name="file_list_action_view_detailed">Detailed</string>
+    <string name="file_list_action_view_gallery">Gallery</string>
     <string name="file_list_action_sort_by_name">Name</string>
     <string name="file_list_action_sort_by_type">Type</string>
     <string name="file_list_action_sort_by_size">Size</string>

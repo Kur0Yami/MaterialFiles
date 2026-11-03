@@ -43,6 +43,15 @@
                 <item
                     android:id="@+id/action_view_grid"
                     android:title="@string/file_list_action_view_grid" />
+                <item
+                    android:id="@+id/action_view_compact"
+                    android:title="@string/file_list_action_view_compact" />
+                <item
+                    android:id="@+id/action_view_detailed"
+                    android:title="@string/file_list_action_view_detailed" />
+                <item
+                    android:id="@+id/action_view_gallery"
+                    android:title="@string/file_list_action_view_gallery" />
             </group>
             <group
                 android:id="@+id/group_sort"

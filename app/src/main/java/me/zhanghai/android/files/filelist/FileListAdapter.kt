@@ -25,6 +25,8 @@ import me.zhanghai.android.files.compat.foregroundCompat
 import me.zhanghai.android.files.compat.getDrawableCompat
 import me.zhanghai.android.files.compat.isSingleLineCompat
 import me.zhanghai.android.files.databinding.FileItemGridBinding
+import me.zhanghai.android.files.databinding.FileItemCompactBinding
+import me.zhanghai.android.files.databinding.FileItemDetailedBinding
 import me.zhanghai.android.files.databinding.FileItemListBinding
 import me.zhanghai.android.files.file.FileItem
 import me.zhanghai.android.files.file.fileSize
@@ -177,16 +179,19 @@ class FileListAdapter(
         val holder = when (viewType) {
             FileViewType.LIST -> ViewHolder(FileItemListBinding.inflate(inflater, parent, false))
             FileViewType.GRID -> ViewHolder(FileItemGridBinding.inflate(inflater, parent, false))
+            FileViewType.COMPACT -> ViewHolder(FileItemCompactBinding.inflate(inflater, parent, false))
+            FileViewType.DETAILED -> ViewHolder(FileItemDetailedBinding.inflate(inflater, parent, false))
+            FileViewType.GALLERY -> ViewHolder(FileItemGridBinding.inflate(inflater, parent, false))
         }
         return holder.apply {
             itemLayout.apply {
                 val context = context
                 val isMaterial3Theme = context.isMaterial3Theme
-                if (viewType == FileViewType.GRID && isMaterial3Theme) {
+                if (viewType.isGridLayout && isMaterial3Theme) {
                     foregroundCompat =
                         context.getDrawableCompat(R.drawable.file_item_grid_foreground_material3)
                 }
-                background = if (viewType == FileViewType.GRID && isMaterial3Theme) {
+                background = if (viewType.isGridLayout && isMaterial3Theme) {
                     CheckableItemBackground.create(4f, 12f, context)
                 } else {
                     CheckableItemBackground.create(0f, 0f, context)
@@ -327,6 +332,17 @@ class FileListAdapter(
             val descriptionSeparator = context.getString(R.string.file_item_description_separator)
             listOf(lastModificationTime, size).joinToString(descriptionSeparator)
         }
+        // Columns of the detailed layout.
+        holder.lastModifiedText?.text = if (isDirectory) {
+            null
+        } else {
+            attributes.lastModifiedTime().toInstant().formatShort(holder.itemLayout.context)
+        }
+        holder.sizeText?.text = if (isDirectory) {
+            null
+        } else {
+            attributes.fileSize.formatHumanReadable(holder.itemLayout.context)
+        }
         val isArchivePath = path.isArchivePath
         menu.findItem(R.id.action_copy)
             .setTitle(if (isArchivePath) R.string.file_item_action_extract else R.string.copy)
@@ -431,6 +447,10 @@ class FileListAdapter(
         val descriptionText: TextView?,
         val menuButton: ImageButton
     ) : RecyclerView.ViewHolder(root) {
+        // Only the detailed layout has these columns; the other layouts leave them null.
+        var lastModifiedText: TextView? = null
+        var sizeText: TextView? = null
+
         constructor(binding: FileItemListBinding) : this(
             binding.root,
             binding.itemLayout,
@@ -446,6 +466,41 @@ class FileListAdapter(
             binding.descriptionText,
             binding.menuButton
         )
+
+        constructor(binding: FileItemCompactBinding) : this(
+            binding.root,
+            binding.itemLayout,
+            binding.iconLayout,
+            binding.iconImage,
+            null,
+            null,
+            null,
+            binding.thumbnailImage,
+            binding.appIconBadgeImage,
+            binding.badgeImage,
+            binding.nameText,
+            null,
+            binding.menuButton
+        )
+
+        constructor(binding: FileItemDetailedBinding) : this(
+            binding.root,
+            binding.itemLayout,
+            binding.iconLayout,
+            binding.iconImage,
+            null,
+            null,
+            null,
+            binding.thumbnailImage,
+            binding.appIconBadgeImage,
+            binding.badgeImage,
+            binding.nameText,
+            null,
+            binding.menuButton
+        ) {
+            lastModifiedText = binding.lastModifiedText
+            sizeText = binding.sizeText
+        }
 
         constructor(binding: FileItemGridBinding) : this(
             binding.root,

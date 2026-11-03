@@ -472,6 +472,18 @@ class FileListFragment : Fragment(), BreadcrumbLayout.Listener, FileListAdapter.
                 viewModel.viewType = FileViewType.GRID
                 true
             }
+            R.id.action_view_compact -> {
+                viewModel.viewType = FileViewType.COMPACT
+                true
+            }
+            R.id.action_view_detailed -> {
+                viewModel.viewType = FileViewType.DETAILED
+                true
+            }
+            R.id.action_view_gallery -> {
+                viewModel.viewType = FileViewType.GALLERY
+                true
+            }
             R.id.action_sort_by_name -> {
                 viewModel.setSortBy(By.NAME)
                 true
@@ -665,15 +677,19 @@ class FileListFragment : Fragment(), BreadcrumbLayout.Listener, FileListAdapter.
 
     private fun updateSpanCount() {
         layoutManager.spanCount = when (viewModel.viewType) {
-            FileViewType.LIST -> 1
-            FileViewType.GRID -> {
+            FileViewType.LIST, FileViewType.COMPACT, FileViewType.DETAILED -> 1
+            FileViewType.GRID, FileViewType.GALLERY -> {
                 var widthDp = resources.configuration.screenWidthDp
                 val persistentDrawerLayout = binding.persistentDrawerLayout
                 if (persistentDrawerLayout != null &&
                     persistentDrawerLayout.isDrawerOpen(GravityCompat.START)) {
                     widthDp -= getDimensionDp(R.dimen.navigation_max_width).roundToInt()
                 }
-                (widthDp / 180).coerceAtLeast(2)
+                if (viewModel.viewType == FileViewType.GALLERY) {
+                    (widthDp / 300).coerceAtLeast(1)
+                } else {
+                    (widthDp / 180).coerceAtLeast(2)
+                }
             }
         }
     }
@@ -701,6 +717,9 @@ class FileListFragment : Fragment(), BreadcrumbLayout.Listener, FileListAdapter.
         val checkedViewTypeItem = when (viewType) {
             FileViewType.LIST -> menuBinding.viewListItem
             FileViewType.GRID -> menuBinding.viewGridItem
+            FileViewType.COMPACT -> menuBinding.viewCompactItem
+            FileViewType.DETAILED -> menuBinding.viewDetailedItem
+            FileViewType.GALLERY -> menuBinding.viewGalleryItem
         }
         checkedViewTypeItem.isChecked = true
         val sortOptions = viewModel.sortOptions
@@ -1834,6 +1853,9 @@ class FileListFragment : Fragment(), BreadcrumbLayout.Listener, FileListAdapter.
         val viewSortItem: MenuItem,
         val viewListItem: MenuItem,
         val viewGridItem: MenuItem,
+        val viewCompactItem: MenuItem,
+        val viewDetailedItem: MenuItem,
+        val viewGalleryItem: MenuItem,
         val sortByNameItem: MenuItem,
         val sortByTypeItem: MenuItem,
         val sortBySizeItem: MenuItem,
@@ -1850,6 +1872,8 @@ class FileListFragment : Fragment(), BreadcrumbLayout.Listener, FileListAdapter.
                 return MenuBinding(
                     menu, menu.findItem(R.id.action_search), menu.findItem(R.id.action_view_sort),
                     menu.findItem(R.id.action_view_list), menu.findItem(R.id.action_view_grid),
+                    menu.findItem(R.id.action_view_compact), menu.findItem(R.id.action_view_detailed),
+                    menu.findItem(R.id.action_view_gallery),
                     menu.findItem(R.id.action_sort_by_name),
                     menu.findItem(R.id.action_sort_by_type),
                     menu.findItem(R.id.action_sort_by_size),
