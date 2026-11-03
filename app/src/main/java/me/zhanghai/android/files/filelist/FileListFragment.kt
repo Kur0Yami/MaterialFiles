@@ -134,7 +134,8 @@ import me.zhanghai.android.files.viewer.image.ImageViewerActivity
 
 class FileListFragment : Fragment(), BreadcrumbLayout.Listener, FileListAdapter.Listener,
     ConfirmReplaceFileDialogFragment.Listener, OpenApkDialogFragment.Listener,
-    RunScriptDialogFragment.Listener,
+    RunScriptDialogFragment.Listener, FilterOptionsDialogFragment.Listener,
+    BatchRenameDialogFragment.Listener,
     ConfirmDeleteFilesDialogFragment.Listener, CreateArchiveDialogFragment.Listener,
     RenameFileDialogFragment.Listener, CreateFileDialogFragment.Listener,
     CreateDirectoryDialogFragment.Listener, NavigateToPathDialogFragment.Listener,
@@ -181,6 +182,17 @@ class FileListFragment : Fragment(), BreadcrumbLayout.Listener, FileListAdapter.
     private lateinit var layoutManager: GridLayoutManager
 
     private lateinit var adapter: FileListAdapter
+
+    // With "subfolders" on, filtering becomes a recursive search after a short typing pause.
+    private val debouncedFilterRunnable = DebouncedRunnable(Handler(Looper.getMainLooper()), 600) {
+        if (!isResumed || !viewModel.isSearchViewExpanded) {
+            return@DebouncedRunnable
+        }
+        val filter = viewModel.currentFilter()
+        if (filter.subfolders && filter.isActive) {
+            viewModel.searchFiltered(filter)
+        }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -381,7 +393,7 @@ class FileListFragment : Fragment(), BreadcrumbLayout.Listener, FileListAdapter.
 
     private fun setUpSearchView() {
         val searchView = menuBinding.searchItem.actionView as FixQueryChangeSearchView
-        searchView.queryHint = getString(R.string.file_list_search_hint)
+        updateSearchHint()
         // MenuItem.OnActionExpandListener.onMenuItemActionExpand() is called before SearchView
         // resets the query.
         searchView.setOnSearchClickListener {
@@ -394,7 +406,8 @@ class FileListFragment : Fragment(), BreadcrumbLayout.Listener, FileListAdapter.
 
             override fun onMenuItemActionCollapse(item: MenuItem): Boolean {
                 viewModel.isSearchViewExpanded = false
-                viewModel.filterQuery = ""
+                debouncedFilterRunnable.cancel()
+                viewModel.resetFilter()
                 viewModel.stopSearching()
                 updateAdapterFileList()
                 return true
@@ -402,7 +415,8 @@ class FileListFragment : Fragment(), BreadcrumbLayout.Listener, FileListAdapter.
         })
         searchView.setOnQueryTextListener(object : SearchView.OnQueryTextListener {
             override fun onQueryTextSubmit(query: String): Boolean {
-                viewModel.search(query)
+                debouncedFilterRunnable.cancel()
+                viewModel.searchFiltered(viewModel.currentFilter())
                 return true
             }
 
@@ -412,12 +426,7 @@ class FileListFragment : Fragment(), BreadcrumbLayout.Listener, FileListAdapter.
                 }
                 viewModel.searchViewQuery = query
                 viewModel.filterQuery = query
-                if (viewModel.searchState.isSearching) {
-                    // Typing again leaves the subfolder results and filters this folder instead.
-                    viewModel.stopSearching()
-                } else {
-                    updateAdapterFileList()
-                }
+                applyFilterChange()
                 return false
             }
         })
@@ -442,6 +451,10 @@ class FileListFragment : Fragment(), BreadcrumbLayout.Listener, FileListAdapter.
 
     override fun onOptionsItemSelected(item: MenuItem): Boolean {
         return when (item.itemId) {
+            R.id.action_filter_options -> {
+                FilterOptionsDialogFragment.show(viewModel.currentFilter(), this)
+                true
+            }
             android.R.id.home -> {
                 binding.drawerLayout?.openDrawer(GravityCompat.START)
                 if (binding.persistentDrawerLayout != null) {
@@ -680,6 +693,7 @@ class FileListFragment : Fragment(), BreadcrumbLayout.Listener, FileListAdapter.
         }
         val searchViewExpanded = viewModel.isSearchViewExpanded
         menuBinding.viewSortItem.isVisible = !searchViewExpanded
+        menuBinding.menu.findItem(R.id.action_filter_options)?.isVisible = searchViewExpanded
         if (searchViewExpanded) {
             return
         }
@@ -733,10 +747,12 @@ class FileListFragment : Fragment(), BreadcrumbLayout.Listener, FileListAdapter.
         if (!Settings.FILE_LIST_SHOW_HIDDEN_FILES.valueCompat) {
             files = files.filterNot { it.isHidden }
         }
-        val filterQuery = viewModel.filterQuery
-        if (filterQuery.isNotBlank() && !viewModel.searchState.isSearching) {
-            val words = me.zhanghai.android.files.provider.common.splitSearchQuery(filterQuery)
-            files = files.filter { me.zhanghai.android.files.provider.common.matchesSearchWords(it.name, words) }
+        val filter = viewModel.currentFilter()
+        if (filter.isActive && !viewModel.searchState.isSearching) {
+            files = files.filter {
+                filter.matchesName(it.name) &&
+                    filter.matchesSize(it.attributes.isDirectory, it.attributes.size())
+            }
         }
         adapter.replaceListAndIsSearching(files, viewModel.searchState.isSearching)
     }
@@ -896,6 +912,7 @@ class FileListFragment : Fragment(), BreadcrumbLayout.Listener, FileListAdapter.
             menu.findItem(R.id.action_extract).isVisible = areAllFilesArchiveFiles
             val isCurrentPathReadOnly = viewModel.currentPath.fileSystem.isReadOnly
             menu.findItem(R.id.action_archive).isVisible = !isCurrentPathReadOnly
+            menu.findItem(R.id.action_batch_rename).isVisible = !isAnyFileReadOnly
         }
         if (!overlayActionMode.isActive) {
             binding.appBarLayout.setExpanded(true)
@@ -947,6 +964,13 @@ class FileListFragment : Fragment(), BreadcrumbLayout.Listener, FileListAdapter.
             }
             R.id.action_share -> {
                 shareFiles(viewModel.selectedFiles)
+                true
+            }
+            R.id.action_batch_rename -> {
+                BatchRenameDialogFragment.show(
+                    viewModel.selectedFiles.sortedBy { it.nameCollationKey },
+                    viewModel.fileListStateful.value?.map { it.name } ?: emptyList(), this
+                )
                 true
             }
             R.id.action_select_all -> {
@@ -1362,6 +1386,61 @@ class FileListFragment : Fragment(), BreadcrumbLayout.Listener, FileListAdapter.
             return null
         }
         return fileListData.value.find { it.name == name }
+    }
+
+    private fun applyFilterChange() {
+        updateSearchHint()
+        val filter = viewModel.currentFilter()
+        if (filter.subfolders && filter.isActive) {
+            debouncedFilterRunnable()
+        } else {
+            debouncedFilterRunnable.cancel()
+            if (viewModel.searchState.isSearching) {
+                viewModel.stopSearching()
+            } else {
+                updateAdapterFileList()
+            }
+        }
+    }
+
+    private fun updateSearchHint() {
+        if (!this::menuBinding.isInitialized) {
+            return
+        }
+        val filter = viewModel.currentFilter()
+        val parts = mutableListOf(getString(R.string.file_list_search_hint))
+        if (filter.regex) {
+            parts += if (filter.isRegexInvalid) "regex!" else "regex"
+        }
+        if (filter.subfolders) {
+            parts += getString(R.string.file_list_filter_subfolders_short)
+        }
+        if (filter.hasSize) {
+            parts += filter.sizeSummary()
+        }
+        (menuBinding.searchItem.actionView as? SearchView)?.queryHint = parts.joinToString(" · ")
+    }
+
+    override fun onFilterOptionsChanged(
+        regex: Boolean,
+        subfolders: Boolean,
+        minSize: Long,
+        maxSize: Long
+    ) {
+        viewModel.filterRegex = regex
+        viewModel.filterSubfolders = subfolders
+        viewModel.filterMinSize = minSize
+        viewModel.filterMaxSize = maxSize
+        applyFilterChange()
+    }
+
+    override fun batchRename(files: List<FileItem>, newNames: List<String>) {
+        for (index in files.indices) {
+            if (files[index].name != newNames[index]) {
+                renameFile(files[index], newNames[index])
+            }
+        }
+        viewModel.clearSelectedFiles()
     }
 
     override fun renameFile(file: FileItem, newName: String) {

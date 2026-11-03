@@ -96,8 +96,31 @@ class FileListViewModel : ViewModel() {
             _searchViewQueryLiveData.value = value
         }
 
-    // Instant filter of the current folder (client side); not the recursive search.
+    // Filter of the current folder (instant, client side) or, with subfolders, a recursive search.
     var filterQuery: String = ""
+    var filterRegex: Boolean = false
+    var filterSubfolders: Boolean = false
+    var filterMinSize: Long = -1
+    var filterMaxSize: Long = -1
+
+    fun currentFilter() =
+        FileFilterSpec(filterQuery, filterRegex, filterSubfolders, filterMinSize, filterMaxSize)
+
+    fun resetFilter() {
+        filterQuery = ""
+        filterRegex = false
+        filterSubfolders = false
+        filterMinSize = -1
+        filterMaxSize = -1
+    }
+
+    fun searchFiltered(filter: FileFilterSpec) {
+        val searchState = _searchStateLiveData.valueCompat
+        if (searchState.isSearching && searchState.filter == filter) {
+            return
+        }
+        _searchStateLiveData.value = SearchState(true, filter.query, filter)
+    }
 
     val breadcrumbLiveData: LiveData<BreadcrumbData> = BreadcrumbLiveData(trailLiveData)
     val canNavigateUpBreadcrumb: Boolean
@@ -263,7 +286,7 @@ class FileListViewModel : ViewModel() {
             val path = pathLiveData.valueCompat
             val searchState = searchStateLiveData.valueCompat
             val liveData = if (searchState.isSearching) {
-                SearchFileListLiveData(path, searchState.query)
+                SearchFileListLiveData(path, searchState.query, searchState.filter)
             } else {
                 FileListLiveData(path)
             }

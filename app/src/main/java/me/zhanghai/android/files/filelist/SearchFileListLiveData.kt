@@ -22,7 +22,8 @@ import java.util.concurrent.Future
 
 class SearchFileListLiveData(
     private val path: Path,
-    private val query: String
+    private val query: String,
+    private val filter: FileFilterSpec = FileFilterSpec()
 ) : CloseableLiveData<Stateful<List<FileItem>>>() {
     private var future: Future<Unit>? = null
 
@@ -36,13 +37,26 @@ class SearchFileListLiveData(
         future = (AsyncTask.THREAD_POOL_EXECUTOR as ExecutorService).submit<Unit> {
             val fileList = mutableListOf<FileItem>()
             try {
-                path.search(query, INTERVAL_MILLIS) { paths: List<Path> ->
+                // Regex / size filters are applied here, so the provider just lists everything.
+                path.search(if (filter.isPlain) query else "", INTERVAL_MILLIS) { paths: List<Path> ->
                     for (path in paths) {
+                        if (!filter.isPlain) {
+                            val fileName = path.fileName?.toString() ?: continue
+                            if (!filter.matchesName(fileName)) {
+                                continue
+                            }
+                        }
                         val fileItem = try {
                             path.loadFileItem()
                         } catch (e: IOException) {
                             e.printStackTrace()
                             // TODO: Support file without information.
+                            continue
+                        }
+                        if (!filter.matchesSize(
+                                fileItem.attributes.isDirectory, fileItem.attributes.size()
+                            )
+                        ) {
                             continue
                         }
                         fileList.add(fileItem)
