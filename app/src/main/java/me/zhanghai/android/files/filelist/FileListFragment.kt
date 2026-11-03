@@ -445,7 +445,10 @@ class FileListFragment : Fragment(), BreadcrumbLayout.Listener, FileListAdapter.
             R.id.typeChipFolders to FileTypeFilter.FOLDERS,
             R.id.typeChipImages to FileTypeFilter.IMAGES,
             R.id.typeChipVideos to FileTypeFilter.VIDEOS,
-            R.id.typeChipAudio to FileTypeFilter.AUDIO
+            R.id.typeChipAudio to FileTypeFilter.AUDIO,
+            R.id.typeChipDocuments to FileTypeFilter.DOCUMENTS,
+            R.id.typeChipArchives to FileTypeFilter.ARCHIVES,
+            R.id.typeChipApps to FileTypeFilter.APPS
         )
         for ((id, type) in chips) {
             binding.appBarLayout.findViewById<View>(id).setOnClickListener {
@@ -454,15 +457,12 @@ class FileListFragment : Fragment(), BreadcrumbLayout.Listener, FileListAdapter.
                 applyFilterChange()
             }
         }
+        // Show the current selection (All by default) as soon as the list is set up.
+        updateTypeFilterChips()
     }
 
     private fun updateTypeFilterChips() {
         if (!this::binding.isInitialized) {
-            return
-        }
-        val expanded = viewModel.isSearchViewExpanded
-        binding.appBarLayout.findViewById<View>(R.id.typeFilterScroll).isVisible = expanded
-        if (!expanded) {
             return
         }
         val checkedId = when (viewModel.filterType) {
@@ -471,6 +471,9 @@ class FileListFragment : Fragment(), BreadcrumbLayout.Listener, FileListAdapter.
             FileTypeFilter.IMAGES -> R.id.typeChipImages
             FileTypeFilter.VIDEOS -> R.id.typeChipVideos
             FileTypeFilter.AUDIO -> R.id.typeChipAudio
+            FileTypeFilter.DOCUMENTS -> R.id.typeChipDocuments
+            FileTypeFilter.ARCHIVES -> R.id.typeChipArchives
+            FileTypeFilter.APPS -> R.id.typeChipApps
         }
         binding.appBarLayout.findViewById<com.google.android.material.chip.ChipGroup>(
             R.id.typeFilterChipGroup

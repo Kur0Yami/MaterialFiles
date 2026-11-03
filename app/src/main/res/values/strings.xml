@@ -247,6 +247,9 @@
     <string name="file_list_filter_type_images">Images</string>
     <string name="file_list_filter_type_videos">Videos</string>
     <string name="file_list_filter_type_audio">Audio</string>
+    <string name="file_list_filter_type_documents">Documents</string>
+    <string name="file_list_filter_type_archives">Archives</string>
+    <string name="file_list_filter_type_apps">Apps</string>
     <string name="file_list_select_action_batch_rename">Batch rename</string>
     <string name="batch_rename_title">Batch rename (%1$d files)</string>
     <string name="batch_rename_pattern_hint">New name</string>

@@ -114,7 +114,7 @@ class FileListViewModel : ViewModel() {
         filterSubfolders = false
         filterMinSize = -1
         filterMaxSize = -1
-        filterType = FileTypeFilter.ALL
+        // filterType is kept on purpose: the chip row is always visible, like Voyager's.
     }
 
     fun searchFiltered(filter: FileFilterSpec) {

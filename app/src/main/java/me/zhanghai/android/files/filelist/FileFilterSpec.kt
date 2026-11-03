@@ -12,7 +12,25 @@ import me.zhanghai.android.files.provider.common.splitSearchQuery
 
 /** Quick type chips (fork patch). */
 enum class FileTypeFilter {
-    ALL, FOLDERS, IMAGES, VIDEOS, AUDIO
+    ALL, FOLDERS, IMAGES, VIDEOS, AUDIO, DOCUMENTS, ARCHIVES, APPS
+}
+
+private val ARCHIVE_MIME_TYPES = setOf(
+    "application/zip", "application/x-zip-compressed", "application/x-tar", "application/gzip",
+    "application/x-gzip", "application/x-bzip2", "application/x-xz", "application/x-7z-compressed",
+    "application/x-rar-compressed", "application/vnd.rar"
+)
+
+private fun isDocumentMime(mimeType: MimeType): Boolean {
+    val value = mimeType.value
+    return mimeType.type == "text" ||
+        value.startsWith("application/pdf") ||
+        value.startsWith("application/msword") ||
+        value.startsWith("application/vnd.openxmlformats-officedocument") ||
+        value.startsWith("application/vnd.ms-") ||
+        value.startsWith("application/vnd.oasis.opendocument") ||
+        value.startsWith("application/rtf") ||
+        value.startsWith("application/epub")
 }
 
 data class FileFilterSpec(
@@ -56,12 +74,26 @@ data class FileFilterSpec(
         else -> matchesSearchWords(name, words)
     }
 
-    fun matchesType(isDirectory: Boolean, mimeType: MimeType): Boolean = when (type) {
-        FileTypeFilter.ALL -> true
-        FileTypeFilter.FOLDERS -> isDirectory
-        FileTypeFilter.IMAGES -> !isDirectory && mimeType.type == "image"
-        FileTypeFilter.VIDEOS -> !isDirectory && mimeType.type == "video"
-        FileTypeFilter.AUDIO -> !isDirectory && mimeType.type == "audio"
+    fun matchesType(isDirectory: Boolean, mimeType: MimeType): Boolean {
+        if (type == FileTypeFilter.ALL) {
+            return true
+        }
+        if (type == FileTypeFilter.FOLDERS) {
+            return isDirectory
+        }
+        if (isDirectory) {
+            return false
+        }
+        val value = mimeType.value.substringBefore(';')
+        return when (type) {
+            FileTypeFilter.IMAGES -> mimeType.type == "image"
+            FileTypeFilter.VIDEOS -> mimeType.type == "video"
+            FileTypeFilter.AUDIO -> mimeType.type == "audio"
+            FileTypeFilter.DOCUMENTS -> isDocumentMime(mimeType)
+            FileTypeFilter.ARCHIVES -> value in ARCHIVE_MIME_TYPES
+            FileTypeFilter.APPS -> value == "application/vnd.android.package-archive"
+            else -> true
+        }
     }
 
     /** Folders have no meaningful size, so any size bound excludes them. */
