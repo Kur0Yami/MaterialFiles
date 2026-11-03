@@ -28,6 +28,7 @@ import me.zhanghai.android.files.databinding.FileItemGridBinding
 import me.zhanghai.android.files.databinding.FileItemCompactBinding
 import me.zhanghai.android.files.databinding.FileItemDetailedBinding
 import me.zhanghai.android.files.databinding.FileItemListBinding
+import me.zhanghai.android.files.provider.common.newDirectoryStream
 import me.zhanghai.android.files.file.FileItem
 import me.zhanghai.android.files.file.fileSize
 import me.zhanghai.android.files.file.formatShort
@@ -172,6 +173,45 @@ class FileListAdapter(
     }
 
     override fun getItemViewType(position: Int): Int = viewType.ordinal
+
+    private val directoryCountExecutor by lazy {
+        java.util.concurrent.Executors.newSingleThreadExecutor()
+    }
+    private val directoryCountCache = mutableMapOf<Path, Int>()
+    private val directoryCountRequests = mutableSetOf<Path>()
+
+    /**
+     * Returns the number of items in a folder for the detailed view. Counting reads the folder,
+     * which can be slow over root or Shizuku, so it runs on a background thread and the row is
+     * refreshed when the count arrives.
+     */
+    private fun getDirectoryCountText(holder: ViewHolder, path: Path): String {
+        val context = holder.itemLayout.context
+        directoryCountCache[path]?.let { return context.getString(R.string.file_item_folder_count, it) }
+        if (directoryCountRequests.add(path)) {
+            directoryCountExecutor.execute {
+                val count = try {
+                    path.newDirectoryStream().use { it.count() }
+                } catch (e: Exception) {
+                    -1
+                }
+                holder.itemView.post {
+                    directoryCountRequests.remove(path)
+                    if (count >= 0) {
+                        directoryCountCache[path] = count
+                        for (i in 0 until itemCount) {
+                            if (getItem(i).path == path) {
+                                notifyItemChanged(i, DirectoryCountPayload)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        return ""
+    }
+
+    private object DirectoryCountPayload
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): ViewHolder {
         val viewType = FileViewType.entries[viewType]
@@ -322,6 +362,8 @@ class FileListAdapter(
             }
         }
         holder.nameText.text = file.name
+        // Gallery shows thumbnails only.
+        holder.nameText.isVisible = viewType != FileViewType.GALLERY
         holder.descriptionText?.text = if (isDirectory) {
             null
         } else {
@@ -333,13 +375,10 @@ class FileListAdapter(
             listOf(lastModificationTime, size).joinToString(descriptionSeparator)
         }
         // Columns of the detailed layout.
-        holder.lastModifiedText?.text = if (isDirectory) {
-            null
-        } else {
+        holder.lastModifiedText?.text =
             attributes.lastModifiedTime().toInstant().formatShort(holder.itemLayout.context)
-        }
         holder.sizeText?.text = if (isDirectory) {
-            null
+            getDirectoryCountText(holder, path)
         } else {
             attributes.fileSize.formatHumanReadable(holder.itemLayout.context)
         }

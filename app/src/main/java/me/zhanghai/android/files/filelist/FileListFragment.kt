@@ -678,18 +678,15 @@ class FileListFragment : Fragment(), BreadcrumbLayout.Listener, FileListAdapter.
     private fun updateSpanCount() {
         layoutManager.spanCount = when (viewModel.viewType) {
             FileViewType.LIST, FileViewType.COMPACT, FileViewType.DETAILED -> 1
-            FileViewType.GRID, FileViewType.GALLERY -> {
+            FileViewType.GALLERY -> 5
+            FileViewType.GRID -> {
                 var widthDp = resources.configuration.screenWidthDp
                 val persistentDrawerLayout = binding.persistentDrawerLayout
                 if (persistentDrawerLayout != null &&
                     persistentDrawerLayout.isDrawerOpen(GravityCompat.START)) {
                     widthDp -= getDimensionDp(R.dimen.navigation_max_width).roundToInt()
                 }
-                if (viewModel.viewType == FileViewType.GALLERY) {
-                    (widthDp / 300).coerceAtLeast(1)
-                } else {
-                    (widthDp / 180).coerceAtLeast(2)
-                }
+                (widthDp / 180).coerceAtLeast(2)
             }
         }
     }
