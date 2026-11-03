@@ -184,7 +184,7 @@ class FileListFragment : Fragment(), BreadcrumbLayout.Listener, FileListAdapter.
     private lateinit var adapter: FileListAdapter
 
     // With "subfolders" on, filtering becomes a recursive search after a short typing pause.
-    private val debouncedFilterRunnable = DebouncedRunnable(Handler(Looper.getMainLooper()), 600) {
+    private val debouncedFilterRunnable = DebouncedRunnable(Handler(Looper.getMainLooper()), 350) {
         if (!isResumed || !viewModel.isSearchViewExpanded) {
             return@DebouncedRunnable
         }
@@ -742,19 +742,35 @@ class FileListFragment : Fragment(), BreadcrumbLayout.Listener, FileListAdapter.
         updateShowHiddenFilesMenuItem()
     }
 
+    // Filtering runs off the main thread so typing never waits on a big folder. Only the newest
+    // request is applied, so a slow earlier pass can't overwrite a newer result.
+    private val filterExecutor by lazy { java.util.concurrent.Executors.newSingleThreadExecutor() }
+    private val filterHandler = Handler(Looper.getMainLooper())
+    private var filterGeneration = 0
+
     private fun updateAdapterFileList() {
-        var files = viewModel.fileListStateful.value ?: return
-        if (!Settings.FILE_LIST_SHOW_HIDDEN_FILES.valueCompat) {
-            files = files.filterNot { it.isHidden }
-        }
+        val files = viewModel.fileListStateful.value ?: return
+        val showHidden = Settings.FILE_LIST_SHOW_HIDDEN_FILES.valueCompat
         val filter = viewModel.currentFilter()
-        if (filter.isActive && !viewModel.searchState.isSearching) {
-            files = files.filter {
-                filter.matchesName(it.name) &&
-                    filter.matchesSize(it.attributes.isDirectory, it.attributes.size())
+        val isSearching = viewModel.searchState.isSearching
+        val generation = ++filterGeneration
+        filterExecutor.execute {
+            var result = files
+            if (!showHidden) {
+                result = result.filterNot { it.isHidden }
+            }
+            if (filter.isActive && !isSearching) {
+                result = result.filter {
+                    filter.matchesName(it.name) &&
+                        filter.matchesSize(it.attributes.isDirectory, it.attributes.size())
+                }
+            }
+            filterHandler.post {
+                if (generation == filterGeneration && isAdded) {
+                    adapter.replaceListAndIsSearching(result, isSearching)
+                }
             }
         }
-        adapter.replaceListAndIsSearching(files, viewModel.searchState.isSearching)
     }
 
     private fun updateShowHiddenFilesMenuItem() {

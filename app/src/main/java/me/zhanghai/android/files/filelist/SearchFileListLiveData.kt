@@ -36,6 +36,7 @@ class SearchFileListLiveData(
         value = Loading(emptyList())
         future = (AsyncTask.THREAD_POOL_EXECUTOR as ExecutorService).submit<Unit> {
             val fileList = mutableListOf<FileItem>()
+            var lastPostMillis = 0L
             try {
                 // Regex / size filters are applied here, so the provider just lists everything.
                 path.search(if (filter.isPlain) query else "", INTERVAL_MILLIS) { paths: List<Path> ->
@@ -61,7 +62,13 @@ class SearchFileListLiveData(
                         }
                         fileList.add(fileItem)
                     }
-                    postValue(Loading(fileList.toList()))
+                    // Copying the whole list on every batch gets slow for big trees, so partial
+                    // results are published at most every POST_INTERVAL_MILLIS. Success is always sent.
+                    val now = System.currentTimeMillis()
+                    if (now - lastPostMillis >= POST_INTERVAL_MILLIS) {
+                        lastPostMillis = now
+                        postValue(Loading(fileList.toList()))
+                    }
                 }
                 postValue(Success(fileList))
             } catch (e: Exception) {
@@ -77,5 +84,6 @@ class SearchFileListLiveData(
 
     companion object {
         private const val INTERVAL_MILLIS = 200L
+        private const val POST_INTERVAL_MILLIS = 250L
     }
 }
