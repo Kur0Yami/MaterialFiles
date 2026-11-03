@@ -678,7 +678,7 @@ class FileListFragment : Fragment(), BreadcrumbLayout.Listener, FileListAdapter.
     private fun updateSpanCount() {
         layoutManager.spanCount = when (viewModel.viewType) {
             FileViewType.LIST, FileViewType.COMPACT, FileViewType.DETAILED -> 1
-            FileViewType.GALLERY -> 5
+            FileViewType.GALLERY -> 4
             FileViewType.GRID -> {
                 var widthDp = resources.configuration.screenWidthDp
                 val persistentDrawerLayout = binding.persistentDrawerLayout
@@ -783,6 +783,7 @@ class FileListFragment : Fragment(), BreadcrumbLayout.Listener, FileListAdapter.
             }
             filterHandler.post {
                 if (generation == filterGeneration && isAdded) {
+                    adapter.galleryLabels = result.any { !it.isMediaFile() }
                     adapter.replaceListAndIsSearching(result, isSearching)
                 }
             }

@@ -13,7 +13,7 @@ enum class FileViewType {
     DETAILED,
     GALLERY;
 
-    /** Whether items use the grid item layout (thumbnail cards). */
+    /** Whether items use the grid card style. Gallery has flat tiles, not cards. */
     val isGridLayout: Boolean
-        get() = this == GRID || this == GALLERY
+        get() = this == GRID
 }

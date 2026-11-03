@@ -26,6 +26,7 @@ import me.zhanghai.android.files.compat.getDrawableCompat
 import me.zhanghai.android.files.compat.isSingleLineCompat
 import me.zhanghai.android.files.databinding.FileItemGridBinding
 import me.zhanghai.android.files.databinding.FileItemCompactBinding
+import me.zhanghai.android.files.databinding.FileItemGalleryBinding
 import me.zhanghai.android.files.databinding.FileItemDetailedBinding
 import me.zhanghai.android.files.databinding.FileItemListBinding
 import me.zhanghai.android.files.provider.common.newDirectoryStream
@@ -177,6 +178,14 @@ class FileListAdapter(
     private val directoryCountExecutor by lazy {
         java.util.concurrent.Executors.newSingleThreadExecutor()
     }
+    /** Gallery: whether tiles get a name strip. False when the folder holds only media. */
+    var galleryLabels: Boolean = true
+        set(value) {
+            if (field != value) {
+                field = value
+                notifyItemRangeChanged(0, itemCount, RebindPayload)
+            }
+        }
     private val directoryCountCache = mutableMapOf<Path, Int>()
     private val directoryCountRequests = mutableSetOf<Path>()
 
@@ -213,6 +222,8 @@ class FileListAdapter(
 
     private object DirectoryCountPayload
 
+    private object RebindPayload
+
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): ViewHolder {
         val viewType = FileViewType.entries[viewType]
         val inflater = parent.context.layoutInflater
@@ -221,7 +232,7 @@ class FileListAdapter(
             FileViewType.GRID -> ViewHolder(FileItemGridBinding.inflate(inflater, parent, false))
             FileViewType.COMPACT -> ViewHolder(FileItemCompactBinding.inflate(inflater, parent, false))
             FileViewType.DETAILED -> ViewHolder(FileItemDetailedBinding.inflate(inflater, parent, false))
-            FileViewType.GALLERY -> ViewHolder(FileItemGridBinding.inflate(inflater, parent, false))
+            FileViewType.GALLERY -> ViewHolder(FileItemGalleryBinding.inflate(inflater, parent, false))
         }
         return holder.apply {
             itemLayout.apply {
@@ -362,8 +373,9 @@ class FileListAdapter(
             }
         }
         holder.nameText.text = file.name
-        // Gallery shows thumbnails only.
-        holder.nameText.isVisible = viewType != FileViewType.GALLERY
+        val isGallery = viewType == FileViewType.GALLERY
+        holder.galleryNameBar?.isVisible = isGallery && galleryLabels
+        holder.menuButton.isVisible = !(isGallery && !galleryLabels)
         holder.descriptionText?.text = if (isDirectory) {
             null
         } else {
@@ -489,6 +501,7 @@ class FileListAdapter(
         // Only the detailed layout has these columns; the other layouts leave them null.
         var lastModifiedText: TextView? = null
         var sizeText: TextView? = null
+        var galleryNameBar: View? = null
 
         constructor(binding: FileItemListBinding) : this(
             binding.root,
@@ -539,6 +552,24 @@ class FileListAdapter(
         ) {
             lastModifiedText = binding.lastModifiedText
             sizeText = binding.sizeText
+        }
+
+        constructor(binding: FileItemGalleryBinding) : this(
+            binding.root,
+            binding.itemLayout,
+            binding.iconLayout,
+            binding.iconImage,
+            binding.directoryThumbnailImage,
+            binding.thumbnailOutlineView,
+            binding.thumbnailIconImage,
+            binding.thumbnailImage,
+            binding.appIconBadgeImage,
+            binding.badgeImage,
+            binding.nameText,
+            null,
+            binding.menuButton
+        ) {
+            galleryNameBar = binding.galleryNameBar
         }
 
         constructor(binding: FileItemGridBinding) : this(
