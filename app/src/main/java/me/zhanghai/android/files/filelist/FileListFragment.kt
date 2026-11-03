@@ -182,17 +182,6 @@ class FileListFragment : Fragment(), BreadcrumbLayout.Listener, FileListAdapter.
 
     private lateinit var adapter: FileListAdapter
 
-    private val debouncedSearchRunnable = DebouncedRunnable(Handler(Looper.getMainLooper()), 1000) {
-        if (!isResumed || !viewModel.isSearchViewExpanded) {
-            return@DebouncedRunnable
-        }
-        val query = viewModel.searchViewQuery
-        if (query.isEmpty()) {
-            return@DebouncedRunnable
-        }
-        viewModel.search(query)
-    }
-
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
@@ -392,12 +381,12 @@ class FileListFragment : Fragment(), BreadcrumbLayout.Listener, FileListAdapter.
 
     private fun setUpSearchView() {
         val searchView = menuBinding.searchItem.actionView as FixQueryChangeSearchView
+        searchView.queryHint = getString(R.string.file_list_search_hint)
         // MenuItem.OnActionExpandListener.onMenuItemActionExpand() is called before SearchView
         // resets the query.
         searchView.setOnSearchClickListener {
             viewModel.isSearchViewExpanded = true
             searchView.setQuery(viewModel.searchViewQuery, false)
-            debouncedSearchRunnable()
         }
         // SearchView.OnCloseListener.onClose() is not always called.
         menuBinding.searchItem.setOnActionExpandListener(object : MenuItem.OnActionExpandListener {
@@ -405,13 +394,14 @@ class FileListFragment : Fragment(), BreadcrumbLayout.Listener, FileListAdapter.
 
             override fun onMenuItemActionCollapse(item: MenuItem): Boolean {
                 viewModel.isSearchViewExpanded = false
+                viewModel.filterQuery = ""
                 viewModel.stopSearching()
+                updateAdapterFileList()
                 return true
             }
         })
         searchView.setOnQueryTextListener(object : SearchView.OnQueryTextListener {
             override fun onQueryTextSubmit(query: String): Boolean {
-                debouncedSearchRunnable.cancel()
                 viewModel.search(query)
                 return true
             }
@@ -421,7 +411,13 @@ class FileListFragment : Fragment(), BreadcrumbLayout.Listener, FileListAdapter.
                     return false
                 }
                 viewModel.searchViewQuery = query
-                debouncedSearchRunnable()
+                viewModel.filterQuery = query
+                if (viewModel.searchState.isSearching) {
+                    // Typing again leaves the subfolder results and filters this folder instead.
+                    viewModel.stopSearching()
+                } else {
+                    updateAdapterFileList()
+                }
                 return false
             }
         })
@@ -736,6 +732,11 @@ class FileListFragment : Fragment(), BreadcrumbLayout.Listener, FileListAdapter.
         var files = viewModel.fileListStateful.value ?: return
         if (!Settings.FILE_LIST_SHOW_HIDDEN_FILES.valueCompat) {
             files = files.filterNot { it.isHidden }
+        }
+        val filterQuery = viewModel.filterQuery
+        if (filterQuery.isNotBlank() && !viewModel.searchState.isSearching) {
+            val words = me.zhanghai.android.files.provider.common.splitSearchQuery(filterQuery)
+            files = files.filter { me.zhanghai.android.files.provider.common.matchesSearchWords(it.name, words) }
         }
         adapter.replaceListAndIsSearching(files, viewModel.searchState.isSearching)
     }

@@ -230,6 +230,7 @@
     <string name="file_run_script_shizuku_unavailable">Shizuku isn\'t running</string>
     <string name="file_run_script_open_as_text">Open as text</string>
     <string name="file_run_script_stop">Stop</string>
+    <string name="file_list_search_hint">Filter folder (Enter: search subfolders)</string>
     <string name="file_open_apk_message">This file is an Android package. Do you want to install it, or view its contents?</string>
     <string name="file_edit_title" translatable="false">@string/edit</string>
     <string name="file_open_as_title">Open as…</string>

@@ -25,6 +25,7 @@ object WalkFileTreeSearchable {
         listener: (List<Path>) -> Unit
     ) {
         val paths = mutableListOf<Path>()
+        val words = splitSearchQuery(query)
         // We cannot use Files.find() or Files.walk() because it cannot ignore exceptions.
         walkFileTreeForSearch(directory, object : FileVisitor<Path> {
             private var lastProgressMillis = System.currentTimeMillis()
@@ -76,7 +77,7 @@ object WalkFileTreeSearchable {
                     return
                 }
                 val fileName = path.fileName
-                if (fileName != null && fileName.toString().contains(query, true)) {
+                if (fileName != null && matchesSearchWords(fileName.toString(), words)) {
                     paths.add(path)
                 }
                 if (paths.isNotEmpty()) {

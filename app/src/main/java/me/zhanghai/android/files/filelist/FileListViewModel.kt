@@ -96,6 +96,9 @@ class FileListViewModel : ViewModel() {
             _searchViewQueryLiveData.value = value
         }
 
+    // Instant filter of the current folder (client side); not the recursive search.
+    var filterQuery: String = ""
+
     val breadcrumbLiveData: LiveData<BreadcrumbData> = BreadcrumbLiveData(trailLiveData)
     val canNavigateUpBreadcrumb: Boolean
         get() = breadcrumbLiveData.valueCompat.selectedIndex > 0

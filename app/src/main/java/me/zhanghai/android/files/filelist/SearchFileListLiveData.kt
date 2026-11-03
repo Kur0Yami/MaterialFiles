@@ -62,6 +62,6 @@ class SearchFileListLiveData(
     }
 
     companion object {
-        private const val INTERVAL_MILLIS = 500L
+        private const val INTERVAL_MILLIS = 200L
     }
 }
