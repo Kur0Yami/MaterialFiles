@@ -68,6 +68,7 @@ import androidx.media3.common.TrackSelectionOverride
 import androidx.media3.common.VideoSize
 import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.SeekParameters
 import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
 import java8.nio.file.Files
@@ -169,6 +170,7 @@ class VideoPlayerActivity : AppActivity() {
     private var seekStartPosition = 0L
     private var seekAmount: Long? = null
     private var seekStartX = 0f
+    private var pendingSeekPosition: Long? = null
 
     // Double tap / long press.
     private var doubleTapSeekMs = 0L
@@ -270,6 +272,7 @@ class VideoPlayerActivity : AppActivity() {
                 .build(),
             true
         )
+        exoPlayer.setSeekParameters(SeekParameters.CLOSEST_SYNC)
         exoPlayer.addListener(playerListener)
         playerView.player = exoPlayer
         player = exoPlayer
@@ -659,7 +662,7 @@ class VideoPlayerActivity : AppActivity() {
         // Seekbar.
         seekBar = PlayerSeekBar(this).apply {
             onSeek = { value -> onSeekBarSeek(value) }
-            onSeekEnd = { endSeek() }
+            onSeekEnd = { value -> commitSeek(value) }
         }
         bottomBar.addView(
             seekBar,
@@ -1075,7 +1078,7 @@ class VideoPlayerActivity : AppActivity() {
                 val newPosition = (seekStartPosition + ((event.x - seekStartX) * 50).toLong())
                     .coerceIn(0L, duration)
                 seekAmount = newPosition - seekStartPosition
-                p.seekTo(newPosition)
+                pendingSeekPosition = newPosition
                 updateInfo()
             }
             DRAG_VERTICAL -> {
@@ -1096,7 +1099,11 @@ class VideoPlayerActivity : AppActivity() {
 
     private fun endDrag() {
         when (dragMode) {
-            DRAG_SEEK -> endSeek()
+            DRAG_SEEK -> {
+                pendingSeekPosition?.let { player?.seekTo(it) }
+                pendingSeekPosition = null
+                endSeek()
+            }
             DRAG_VERTICAL -> {
                 handler.removeCallbacks(hideVerticalRunnable)
                 handler.postDelayed(hideVerticalRunnable, 1000)
@@ -1118,8 +1125,16 @@ class VideoPlayerActivity : AppActivity() {
         }
         val position = value.coerceIn(0L, duration)
         seekAmount = position - seekStartPosition
-        p.seekTo(position)
         updateInfo()
+    }
+
+    // Seek once, when the finger is released, instead of on every move.
+    private fun commitSeek(value: Long) {
+        val p = player
+        if (p != null && isSeeking && p.duration > 0) {
+            p.seekTo(value.coerceIn(0L, p.duration))
+        }
+        endSeek()
     }
 
     private fun endSeek() {
@@ -1844,7 +1859,7 @@ class VideoPlayerActivity : AppActivity() {
 /** Next Player's SimpleSlider: 4dp track, white 50% inactive, primary active, 16dp white thumb. */
 private class PlayerSeekBar(context: Context) : View(context) {
     var onSeek: ((Long) -> Unit)? = null
-    var onSeekEnd: (() -> Unit)? = null
+    var onSeekEnd: ((Long) -> Unit)? = null
     private var position = 0L
     private var duration = 0L
     private var scrubbing = false
@@ -1901,7 +1916,7 @@ private class PlayerSeekBar(context: Context) : View(context) {
             }
             MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
                 scrubbing = false
-                onSeekEnd?.invoke()
+                onSeekEnd?.invoke(position)
             }
         }
         return true
