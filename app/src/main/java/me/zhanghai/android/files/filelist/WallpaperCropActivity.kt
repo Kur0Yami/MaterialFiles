@@ -20,6 +20,7 @@ import android.view.ViewGroup
 import android.widget.Button
 import android.widget.LinearLayout
 import android.widget.TextView
+import com.google.android.material.button.MaterialButton
 import java8.nio.file.Path
 import me.zhanghai.android.files.app.AppActivity
 import me.zhanghai.android.files.provider.common.newInputStream
@@ -111,17 +112,22 @@ class WallpaperCropActivity : AppActivity() {
         root.addView(cropView, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
         val bar = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
-            setPadding(dp(8), dp(4), dp(8), dp(8))
+            setPadding(dp(8), dp(4), dp(8), dp(12))
         }
         fun button(label: String, onClick: () -> Unit) {
-            val button = Button(this).apply {
+            val button = MaterialButton(this).apply {
                 text = label
                 isAllCaps = false
                 isEnabled = false
                 setOnClickListener { onClick() }
             }
             buttons.add(button)
-            bar.addView(button, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+            bar.addView(
+                button,
+                LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply {
+                    setMargins(dp(4), 0, dp(4), 0)
+                }
+            )
         }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
             button("Home") { applyWallpaper(WallpaperManager.FLAG_SYSTEM) }
