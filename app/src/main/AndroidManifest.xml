@@ -293,6 +293,13 @@
             android:theme="@style/Theme.MaterialFiles" />
 
         <activity
+            android:name="me.zhanghai.android.files.filelist.WallpaperCropActivity"
+            android:exported="false"
+            android:label="@string/app_name"
+            android:screenOrientation="portrait"
+            android:theme="@style/Theme.MaterialFiles" />
+
+        <activity
             android:name="me.zhanghai.android.files.videolibrary.VideoLibraryActivity"
             android:exported="true"
             android:label="@string/navigation_standard_directory_video" />

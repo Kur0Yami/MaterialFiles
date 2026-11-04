@@ -26,6 +26,7 @@ import kotlinx.parcelize.WriteWith
 import me.zhanghai.android.files.R
 import me.zhanghai.android.files.databinding.ImageViewerFragmentBinding
 import me.zhanghai.android.files.file.fileProviderUri
+import me.zhanghai.android.files.filelist.ImageToolActions
 import me.zhanghai.android.files.provider.common.delete
 import me.zhanghai.android.files.ui.DepthPageTransformer
 import me.zhanghai.android.files.util.ParcelableArgs
@@ -141,6 +142,18 @@ class ImageViewerFragment : Fragment(), ConfirmDeleteDialogFragment.Listener {
         super.onCreateOptionsMenu(menu, inflater)
 
         inflater.inflate(R.menu.image_viewer, menu)
+        // 0x6e01 = set as wallpaper, 0x6e02 = edit 9-patch (png only, see onPrepareOptionsMenu).
+        menu.add(0, 0x6e01, 200, "Set as wallpaper")
+        menu.add(0, 0x6e02, 201, "Edit 9-patch")
+    }
+
+    override fun onPrepareOptionsMenu(menu: Menu) {
+        super.onPrepareOptionsMenu(menu)
+        if (view == null || paths.isEmpty()) {
+            return
+        }
+        menu.findItem(0x6e02)?.isVisible =
+            currentPath.fileName.toString().endsWith(".png", ignoreCase = true)
     }
 
     override fun onOptionsItemSelected(item: MenuItem): Boolean =
@@ -151,6 +164,14 @@ class ImageViewerFragment : Fragment(), ConfirmDeleteDialogFragment.Listener {
             }
             R.id.action_share -> {
                 share()
+                true
+            }
+            0x6e01 -> {
+                ImageToolActions.setWallpaper(requireContext(), currentPath)
+                true
+            }
+            0x6e02 -> {
+                ImageToolActions.editNinePatch(requireContext(), currentPath)
                 true
             }
             else -> super.onOptionsItemSelected(item)
