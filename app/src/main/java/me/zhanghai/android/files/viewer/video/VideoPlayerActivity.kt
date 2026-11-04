@@ -18,7 +18,7 @@ import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Outline
 import android.graphics.Paint
-import android.graphics.Path
+import android.graphics.Path as AndroidPath
 import android.graphics.RectF
 import android.graphics.Typeface
 import android.graphics.drawable.ColorDrawable
@@ -1908,7 +1908,7 @@ private class DoubleTapView(context: Context) : LinearLayout(context) {
         }
     private val density = resources.displayMetrics.density
     private val fill = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0x33FFFFFF }
-    private val path = Path()
+    private val path = AndroidPath()
     private val arrows = List(3) {
         ImageView(context).apply {
             setImageResource(R.drawable.np_ic_play)
@@ -2045,13 +2045,13 @@ private class VerticalProgressView(context: Context, iconRes: Int) : LinearLayou
         private val density = resources.displayMetrics.density
         private val bg = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = SURFACE_VARIANT }
         private val fg = Paint(Paint.ANTI_ALIAS_FLAG)
-        private val clip = Path()
+        private val clip = AndroidPath()
 
         override fun onDraw(canvas: Canvas) {
             val radius = 12 * density
             val rect = RectF(0f, 0f, width.toFloat(), height.toFloat())
             clip.reset()
-            clip.addRoundRect(rect, radius, radius, Path.Direction.CW)
+            clip.addRoundRect(rect, radius, radius, AndroidPath.Direction.CW)
             canvas.save()
             canvas.clipPath(clip)
             canvas.drawRect(rect, bg)
