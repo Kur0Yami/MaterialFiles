@@ -188,6 +188,7 @@ class WallpaperCropActivity : AppActivity() {
             sourcePath.newInputStream().use { stream ->
                 @Suppress("DEPRECATION")
                 val decoder = BitmapRegionDecoder.newInstance(stream, false)
+                    ?: throw IllegalStateException("decode failed")
                 try {
                     decoder.decodeRegion(region, options)
                 } finally {
