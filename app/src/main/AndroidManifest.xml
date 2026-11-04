@@ -285,6 +285,11 @@
             android:supportsPictureInPicture="true"
             android:theme="@style/Theme.MaterialFiles.Immersive" />
 
+        <activity
+            android:name="me.zhanghai.android.files.videolibrary.VideoLibraryActivity"
+            android:exported="false"
+            android:label="@string/navigation_standard_directory_video" />
+
         <service
             android:name="me.zhanghai.android.files.filejob.FileJobService"
             android:foregroundServiceType="specialUse">

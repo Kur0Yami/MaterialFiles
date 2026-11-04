@@ -26,6 +26,7 @@ import me.zhanghai.android.files.ftpserver.FtpServerActivity
 import me.zhanghai.android.files.settings.Settings
 import me.zhanghai.android.files.settings.SettingsActivity
 import me.zhanghai.android.files.settings.StandardDirectoryListActivity
+import me.zhanghai.android.files.videolibrary.VideoLibraryActivity
 import me.zhanghai.android.files.storage.AddStorageDialogActivity
 import me.zhanghai.android.files.storage.FileSystemRoot
 import me.zhanghai.android.files.storage.Storage
@@ -205,7 +206,10 @@ private val standardDirectoryItems: List<NavigationItem>
     get() =
         StandardDirectoriesLiveData.valueCompat
             .filter { it.isEnabled }
-            .map { StandardDirectoryItem(it) }
+            .map {
+                if (it.relativePath == VIDEO_LIBRARY_KEY) VideoLibraryItem()
+                else StandardDirectoryItem(it)
+            }
 
 private class StandardDirectoryItem(
     private val standardDirectory: StandardDirectory
@@ -226,6 +230,26 @@ private class StandardDirectoryItem(
     override fun onLongClick(listener: Listener): Boolean {
         listener.launchIntent(StandardDirectoryListActivity::class.createIntent())
         return true
+    }
+}
+
+// Standard directory that is not a path: opens the MediaStore-based video library.
+const val VIDEO_LIBRARY_KEY = "video-library"
+
+private class VideoLibraryItem : NavigationItem() {
+    override val id: Long
+        get() = VIDEO_LIBRARY_KEY.hashCode().toLong()
+
+    override val iconRes: Int
+        @DrawableRes
+        get() = R.drawable.video_icon_white_24dp
+
+    override fun getTitle(context: Context): String =
+        context.getString(R.string.navigation_standard_directory_video)
+
+    override fun onClick(listener: Listener) {
+        listener.launchIntent(VideoLibraryActivity::class.createIntent())
+        listener.closeNavigationDrawer()
     }
 }
 
@@ -284,6 +308,10 @@ private val DEFAULT_STANDARD_DIRECTORIES = listOf(
     StandardDirectory(
         R.drawable.video_icon_white_24dp, R.string.navigation_standard_directory_movies,
         Environment.DIRECTORY_MOVIES, true
+    ),
+    StandardDirectory(
+        R.drawable.video_icon_white_24dp, R.string.navigation_standard_directory_video,
+        VIDEO_LIBRARY_KEY, true
     ),
     StandardDirectory(
         R.drawable.audio_icon_white_24dp, R.string.navigation_standard_directory_music,

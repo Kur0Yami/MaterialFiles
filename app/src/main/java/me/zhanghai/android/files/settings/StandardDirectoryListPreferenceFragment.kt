@@ -12,6 +12,8 @@ import me.zhanghai.android.files.compat.getDrawableCompat
 import me.zhanghai.android.files.compat.setTintCompat
 import me.zhanghai.android.files.navigation.StandardDirectoriesLiveData
 import me.zhanghai.android.files.navigation.StandardDirectory
+import me.zhanghai.android.files.R
+import me.zhanghai.android.files.navigation.VIDEO_LIBRARY_KEY
 import me.zhanghai.android.files.navigation.getExternalStorageDirectory
 import me.zhanghai.android.files.ui.PreferenceFragmentCompat
 import me.zhanghai.android.files.util.getColorByAttr
@@ -63,7 +65,11 @@ class StandardDirectoryListPreferenceFragment : PreferenceFragmentCompat(),
                     setTintCompat(secondaryTextColor)
                 }
                 title = standardDirectory.getTitle(context)
-                summary = getExternalStorageDirectory(standardDirectory.relativePath)
+                summary = if (standardDirectory.relativePath == VIDEO_LIBRARY_KEY) {
+                    context.getString(R.string.video_library_summary)
+                } else {
+                    getExternalStorageDirectory(standardDirectory.relativePath)
+                }
                 isChecked = standardDirectory.isEnabled
             }
             preferenceScreen.addPreference(preference)
