@@ -52,6 +52,7 @@ import android.widget.LinearLayout
 import android.widget.ProgressBar
 import android.widget.RadioButton
 import android.widget.ScrollView
+import android.widget.PopupMenu
 import android.widget.SeekBar
 import android.widget.TextView
 import android.widget.Toast
@@ -574,7 +575,8 @@ class VideoPlayerActivity : AppActivity() {
         val buttons = listOf(
             iconButton(R.drawable.np_ic_playlist) { showOverlay(OverlayKind.PLAYLIST) },
             iconButton(R.drawable.np_ic_audio_track) { showOverlay(OverlayKind.AUDIO) },
-            iconButton(R.drawable.np_ic_subtitle_track) { showOverlay(OverlayKind.SUBTITLE) }
+            iconButton(R.drawable.np_ic_subtitle_track) { showOverlay(OverlayKind.SUBTITLE) },
+            iconButton(R.drawable.np_ic_more_vert) { showMoreMenu() }
         )
         buttons.forEachIndexed { index, button ->
             group.addView(
@@ -924,6 +926,12 @@ class VideoPlayerActivity : AppActivity() {
 
             override fun onSingleTapConfirmed(e: MotionEvent): Boolean {
                 if (doubleTapSeekMs != 0L) {
+                    return true
+                }
+                // Touch control: tap toggles play/pause (and shows the controls).
+                if (!controlsLocked && !isInPip && prefs.getBoolean(KEY_TAP_PLAY, false)) {
+                    togglePlay()
+                    showControls()
                     return true
                 }
                 if (controlsVisible) {
@@ -1359,6 +1367,30 @@ class VideoPlayerActivity : AppActivity() {
         } else {
             String.format(Locale.ROOT, "%02d:%02d", minutes, seconds)
         }
+    }
+
+    // Three-dot menu next to the subtitle button.
+    private fun showMoreMenu() {
+        handler.removeCallbacks(hideControlsRunnable)
+        val menu = PopupMenu(this, topBar, Gravity.END)
+        menu.menu.add(0, MENU_TAP_PLAY, 0, "Touch control (tap to pause/play)").apply {
+            isCheckable = true
+            isChecked = prefs.getBoolean(KEY_TAP_PLAY, false)
+        }
+        menu.setOnMenuItemClickListener { item ->
+            if (item.itemId == MENU_TAP_PLAY) {
+                prefs.edit().putBoolean(KEY_TAP_PLAY, !prefs.getBoolean(KEY_TAP_PLAY, false)).apply()
+                true
+            } else {
+                false
+            }
+        }
+        menu.setOnDismissListener {
+            if (player?.isPlaying == true) {
+                scheduleHideControls()
+            }
+        }
+        menu.show()
     }
 
     private fun toggleOrientation() {
@@ -1883,6 +1915,8 @@ class VideoPlayerActivity : AppActivity() {
     companion object {
         private val EXTRA_POSITION = "${VideoPlayerActivity::class.java.name}.extra.POSITION"
         private const val PREFS_NAME = "video_player_positions"
+        private const val KEY_TAP_PLAY = "tap_to_pause_play"
+        private const val MENU_TAP_PLAY = 1
 
         // Shared with the video library (blue = last played, grey = watched).
         const val KEY_LAST_PLAYED = "last_played"
