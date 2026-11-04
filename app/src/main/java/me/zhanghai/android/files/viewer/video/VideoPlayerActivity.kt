@@ -177,16 +177,12 @@ class VideoPlayerActivity : AppActivity() {
     private var seekStartX = 0f
     private var pendingSeekPosition: Long? = null
 
-    // Seekbar preview: one frame per second, cached per video.
-    private val previewLock = Any()
-    private var previewRetriever: MediaMetadataRetriever? = null
-    private var previewPath: String? = null
-    private var previewCachePath: String? = null
-    private val previewCache = LruCache<Long, Bitmap>(PREVIEW_CACHE_SIZE)
-    private var previewJob: Job? = null
-    private lateinit var previewBox: LinearLayout
-    private lateinit var previewView: ImageView
-    private lateinit var previewTime: TextView
+    // Live scrubbing: playback is paused while dragging and seeks are throttled.
+    private var scrubPaused = false
+    private var scrubResumePlayback = false
+    private var scrubQueued = false
+    private var lastScrubSeek = -1L
+    private val scrubRunnable = Runnable { flushScrub() }
 
     // Double tap / long press.
     private var doubleTapSeekMs = 0L
@@ -528,7 +524,6 @@ class VideoPlayerActivity : AppActivity() {
         root.addView(lockedLayer, matchParent())
 
         buildOverlay()
-        buildPreview()
 
         ViewCompat.setOnApplyWindowInsetsListener(root) { _, insets ->
             val bars = insets.getInsets(
@@ -548,108 +543,6 @@ class VideoPlayerActivity : AppActivity() {
             gestB = max(g.bottom, sg.bottom)
             applyInsets()
             insets
-        }
-    }
-
-    private fun buildPreview() {
-        previewView = ImageView(this).apply {
-            scaleType = ImageView.ScaleType.CENTER_CROP
-            background = ColorDrawable(Color.BLACK)
-        }
-        previewTime = label(14f, Color.WHITE, medium())
-        previewBox = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            gravity = Gravity.CENTER_HORIZONTAL
-            visibility = View.GONE
-            addView(previewView, LinearLayout.LayoutParams(dp(PREVIEW_WIDTH_DP), dp(90)))
-            addView(
-                previewTime,
-                LinearLayout.LayoutParams(
-                    ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT
-                ).apply { topMargin = dp(4) }
-            )
-        }
-        root.addView(
-            previewBox,
-            FrameLayout.LayoutParams(
-                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT,
-                Gravity.BOTTOM or Gravity.START
-            ).apply { bottomMargin = dp(104) }
-        )
-    }
-
-    private fun showPreview(positionMs: Long) {
-        val p = player ?: return
-        val path = paths.getOrNull(p.currentMediaItemIndex)?.toString() ?: return
-        if (path != previewCachePath) {
-            previewCache.evictAll()
-            previewCachePath = path
-        }
-        previewBox.visibility = View.VISIBLE
-        previewTime.text = formatTime(positionMs)
-        previewBox.post { positionPreviewBox(positionMs) }
-        val bucket = positionMs / 1000
-        previewCache.get(bucket)?.let {
-            previewView.setImageBitmap(it)
-            return
-        }
-        previewJob?.cancel()
-        previewJob = lifecycleScope.launch {
-            delay(PREVIEW_DEBOUNCE_MS)
-            val frame = withContext(Dispatchers.IO) { loadPreviewFrame(path, bucket * 1000) }
-            if (frame != null) {
-                previewCache.put(bucket, frame)
-                previewView.setImageBitmap(frame)
-            }
-        }
-    }
-
-    private fun hidePreview() {
-        previewJob?.cancel()
-        previewJob = null
-        previewBox.visibility = View.GONE
-    }
-
-    // Keep the preview centered over the seekbar thumb, inside the screen.
-    private fun positionPreviewBox(positionMs: Long) {
-        val duration = player?.duration ?: return
-        if (duration <= 0) return
-        val fraction = (positionMs.toFloat() / duration).coerceIn(0f, 1f)
-        val seekLocation = IntArray(2)
-        val rootLocation = IntArray(2)
-        seekBar.getLocationInWindow(seekLocation)
-        root.getLocationInWindow(rootLocation)
-        val thumbX = (seekLocation[0] - rootLocation[0]) + seekBar.width * fraction
-        previewBox.translationX =
-            (thumbX - previewBox.width / 2f).coerceIn(0f, (root.width - previewBox.width).toFloat())
-    }
-
-    // Runs on a background thread. The retriever is shared, so access is serialized.
-    private fun loadPreviewFrame(path: String, positionMs: Long): Bitmap? = synchronized(previewLock) {
-        try {
-            val retriever = previewRetriever?.takeIf { previewPath == path } ?: run {
-                previewRetriever?.release()
-                MediaMetadataRetriever().apply { setDataSource(path) }.also {
-                    previewRetriever = it
-                    previewPath = path
-                }
-            }
-            val frame = retriever.getFrameAtTime(
-                positionMs * 1000, MediaMetadataRetriever.OPTION_CLOSEST_SYNC
-            ) ?: return@synchronized null
-            val width = dp(PREVIEW_WIDTH_DP)
-            val height = width * frame.height / max(1, frame.width)
-            Bitmap.createScaledBitmap(frame, width, height, true)
-        } catch (e: Exception) {
-            null
-        }
-    }
-
-    private fun releasePreview() {
-        synchronized(previewLock) {
-            previewRetriever?.release()
-            previewRetriever = null
-            previewPath = null
         }
     }
 
@@ -1178,6 +1071,7 @@ class VideoPlayerActivity : AppActivity() {
                 isSeeking = true
                 seekStartX = event.x
                 seekStartPosition = p.currentPosition
+                beginScrub(p)
             } else {
                 dragMode = DRAG_VERTICAL
                 startingY = event.y
@@ -1197,8 +1091,8 @@ class VideoPlayerActivity : AppActivity() {
                 val newPosition = (seekStartPosition + ((event.x - seekStartX) * 50).toLong())
                     .coerceIn(0L, duration)
                 seekAmount = newPosition - seekStartPosition
-                pendingSeekPosition = newPosition
                 updateInfo()
+                scrubTo(newPosition)
             }
             DRAG_VERTICAL -> {
                 val change = ((startingY - event.y) * (0.5f / 10)).toInt()
@@ -1218,11 +1112,7 @@ class VideoPlayerActivity : AppActivity() {
 
     private fun endDrag() {
         when (dragMode) {
-            DRAG_SEEK -> {
-                pendingSeekPosition?.let { player?.seekTo(it) }
-                pendingSeekPosition = null
-                endSeek()
-            }
+            DRAG_SEEK -> finishScrub(pendingSeekPosition)
             DRAG_VERTICAL -> {
                 handler.removeCallbacks(hideVerticalRunnable)
                 handler.postDelayed(hideVerticalRunnable, 1000)
@@ -1241,21 +1131,66 @@ class VideoPlayerActivity : AppActivity() {
         if (!isSeeking) {
             isSeeking = true
             seekStartPosition = p.currentPosition
+            beginScrub(p)
         }
         val position = value.coerceIn(0L, duration)
         seekAmount = position - seekStartPosition
         updateInfo()
-        showPreview(position)
+        scrubTo(position)
     }
 
-    // Seek once, when the finger is released, instead of on every move.
-    private fun commitSeek(value: Long) {
-        hidePreview()
+    // Pause while scrubbing so the audio does not stutter; resumed in finishScrub.
+    private fun beginScrub(p: Player) {
+        if (scrubPaused) {
+            return
+        }
+        scrubPaused = true
+        scrubResumePlayback = p.playWhenReady
+        p.playWhenReady = false
+    }
+
+    // Seek right away, then at most once per SCRUB_INTERVAL_MS, so the video frame follows the finger.
+    private fun scrubTo(position: Long) {
+        pendingSeekPosition = position
+        if (!scrubQueued) {
+            flushScrub()
+        }
+    }
+
+    private fun flushScrub() {
+        scrubQueued = false
+        val position = pendingSeekPosition ?: return
+        val p = player ?: return
+        if (!isSeeking || p.duration <= 0 || position == lastScrubSeek) {
+            return
+        }
+        lastScrubSeek = position
+        p.seekTo(position.coerceIn(0L, p.duration))
+        scrubQueued = true
+        handler.postDelayed(scrubRunnable, SCRUB_INTERVAL_MS)
+    }
+
+    private fun finishScrub(value: Long?) {
+        handler.removeCallbacks(scrubRunnable)
+        scrubQueued = false
         val p = player
-        if (p != null && isSeeking && p.duration > 0) {
+        if (p != null && isSeeking && p.duration > 0 && value != null && value != lastScrubSeek) {
             p.seekTo(value.coerceIn(0L, p.duration))
         }
+        lastScrubSeek = -1L
+        pendingSeekPosition = null
+        if (scrubPaused) {
+            scrubPaused = false
+            if (scrubResumePlayback) {
+                p?.playWhenReady = true
+            }
+        }
+        scrubResumePlayback = false
         endSeek()
+    }
+
+    private fun commitSeek(value: Long) {
+        finishScrub(value)
     }
 
     private fun endSeek() {
@@ -1938,7 +1873,6 @@ class VideoPlayerActivity : AppActivity() {
     override fun onDestroy() {
         super.onDestroy()
         handler.removeCallbacksAndMessages(null)
-        releasePreview()
         player?.let {
             it.removeListener(playerListener)
             it.release()
@@ -1962,9 +1896,7 @@ class VideoPlayerActivity : AppActivity() {
         private const val SEEK_INCREMENT_MS = 10_000L
         private const val MIN_ZOOM = 0.25f
         private const val MAX_ZOOM = 4f
-        private const val PREVIEW_DEBOUNCE_MS = 120L
-        private const val PREVIEW_CACHE_SIZE = 30
-        private const val PREVIEW_WIDTH_DP = 160
+        private const val SCRUB_INTERVAL_MS = 60L
 
         private val SUBTITLE_TYPES = listOf(
             "srt" to MimeTypes.APPLICATION_SUBRIP,
