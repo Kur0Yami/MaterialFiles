@@ -1,16 +1,20 @@
 /*
  * "Video" standard directory: videos from MediaStore, grouped by folder.
- * Tap a folder to list its videos; tapping a video plays that folder as a playlist.
+ * Tap a folder to list its videos (compact / grid / gallery); tapping a video plays that
+ * folder as a playlist.
  */
 
 package me.zhanghai.android.files.videolibrary
 
 import android.content.Context
+import android.content.SharedPreferences
 import android.os.Bundle
 import android.provider.MediaStore
 import android.text.TextUtils
 import android.text.format.DateUtils
 import android.view.Gravity
+import android.view.Menu
+import android.view.MenuItem
 import android.view.View
 import android.view.ViewGroup
 import android.widget.BaseAdapter
@@ -21,10 +25,15 @@ import android.widget.LinearLayout
 import android.widget.ListView
 import android.widget.TextView
 import androidx.activity.OnBackPressedCallback
+import androidx.annotation.StringRes
 import androidx.appcompat.widget.Toolbar
 import androidx.lifecycle.lifecycleScope
+import coil.dispose
+import coil.load
+import java8.nio.file.Files
 import java8.nio.file.Path
 import java8.nio.file.Paths
+import java8.nio.file.attribute.BasicFileAttributes
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -42,12 +51,25 @@ private const val WRAP = ViewGroup.LayoutParams.WRAP_CONTENT
 // Same cap as the image viewer, to avoid TransactionTooLargeException.
 private const val PLAYLIST_SIZE_MAX = 1000
 
+private const val PREFS_NAME = "video_library"
+private const val PREF_VIEW_MODE = "view_mode"
+private const val MENU_GROUP_VIEW_MODE = 1
+
+private enum class VideoViewMode(@StringRes val titleRes: Int, val columns: Int) {
+    COMPACT(R.string.video_view_compact, 1),
+    GRID(R.string.video_view_grid, 2),
+    GALLERY(R.string.video_view_gallery, 3)
+}
+
 @Suppress("DEPRECATION")
 class VideoLibraryActivity : AppActivity() {
     private lateinit var toolbar: Toolbar
     private lateinit var folderGrid: GridView
-    private lateinit var videoList: ListView
+    private lateinit var videoGrid: GridView
     private lateinit var emptyText: TextView
+
+    private val prefs: SharedPreferences by lazy { getSharedPreferences(PREFS_NAME, MODE_PRIVATE) }
+    private var viewMode = VideoViewMode.COMPACT
 
     private var videosByFolder: Map<String, List<VideoEntry>> = emptyMap()
     private var folders: List<FolderEntry> = emptyList()
@@ -57,6 +79,10 @@ class VideoLibraryActivity : AppActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        viewMode = prefs.getString(PREF_VIEW_MODE, null)
+            ?.let { name -> VideoViewMode.entries.find { it.name == name } }
+            ?: VideoViewMode.COMPACT
 
         toolbar = Toolbar(this).apply {
             setBackgroundColor(getColorByAttr(R.attr.colorAppBarSurface))
@@ -74,7 +100,11 @@ class VideoLibraryActivity : AppActivity() {
             clipToPadding = false
             setOnItemClickListener { _, _, position, _ -> showFolder(folders[position]) }
         }
-        videoList = ListView(this).apply {
+        videoGrid = GridView(this).apply {
+            numColumns = viewMode.columns
+            stretchMode = GridView.STRETCH_COLUMN_WIDTH
+            setPadding(dp(8), dp(8), dp(8), dp(8))
+            clipToPadding = false
             setOnItemClickListener { _, _, position, _ -> openPlayer(position) }
         }
         emptyText = TextView(this).apply {
@@ -85,7 +115,7 @@ class VideoLibraryActivity : AppActivity() {
         }
         val content = FrameLayout(this).apply {
             addView(folderGrid, FrameLayout.LayoutParams(MATCH, MATCH))
-            addView(videoList, FrameLayout.LayoutParams(MATCH, MATCH))
+            addView(videoGrid, FrameLayout.LayoutParams(MATCH, MATCH))
             addView(emptyText, FrameLayout.LayoutParams(MATCH, WRAP, Gravity.CENTER))
         }
         setContentView(LinearLayout(this).apply {
@@ -114,6 +144,28 @@ class VideoLibraryActivity : AppActivity() {
         }
     }
 
+    override fun onCreateOptionsMenu(menu: Menu): Boolean {
+        for (mode in VideoViewMode.entries) {
+            menu.add(MENU_GROUP_VIEW_MODE, mode.ordinal, Menu.NONE, mode.titleRes)
+        }
+        menu.setGroupCheckable(MENU_GROUP_VIEW_MODE, true, true)
+        return true
+    }
+
+    override fun onPrepareOptionsMenu(menu: Menu): Boolean {
+        // View modes only apply inside a folder.
+        menu.setGroupVisible(MENU_GROUP_VIEW_MODE, currentFolder != null)
+        menu.findItem(viewMode.ordinal)?.isChecked = true
+        return true
+    }
+
+    override fun onOptionsItemSelected(item: MenuItem): Boolean {
+        val mode = VideoViewMode.entries.getOrNull(item.itemId)
+            ?: return super.onOptionsItemSelected(item)
+        setViewMode(mode)
+        return true
+    }
+
     override fun onSupportNavigateUp(): Boolean {
         if (currentFolder != null) {
             showFolders()
@@ -122,22 +174,35 @@ class VideoLibraryActivity : AppActivity() {
         return super.onSupportNavigateUp()
     }
 
+    private fun setViewMode(mode: VideoViewMode) {
+        viewMode = mode
+        prefs.edit().putString(PREF_VIEW_MODE, mode.name).apply()
+        videoGrid.numColumns = mode.columns
+        if (currentFolder != null) {
+            videoGrid.adapter = VideoAdapter(this, folderVideos, mode)
+        }
+        invalidateOptionsMenu()
+    }
+
     private fun showFolders() {
         currentFolder = null
         toolbar.title = getString(R.string.navigation_standard_directory_video)
         folderGrid.visibility = View.VISIBLE
-        videoList.visibility = View.GONE
+        videoGrid.visibility = View.GONE
         emptyText.visibility = if (folders.isEmpty()) View.VISIBLE else View.GONE
+        invalidateOptionsMenu()
     }
 
     private fun showFolder(folder: FolderEntry) {
         currentFolder = folder
         toolbar.title = folder.name
         folderVideos = videosByFolder[folder.path].orEmpty()
-        videoList.adapter = VideoRowAdapter(this, folderVideos)
+        videoGrid.numColumns = viewMode.columns
+        videoGrid.adapter = VideoAdapter(this, folderVideos, viewMode)
         folderGrid.visibility = View.GONE
-        videoList.visibility = View.VISIBLE
+        videoGrid.visibility = View.VISIBLE
         emptyText.visibility = View.GONE
+        invalidateOptionsMenu()
     }
 
     private fun queryVideos(): List<VideoEntry> {
@@ -160,8 +225,13 @@ class VideoLibraryActivity : AppActivity() {
             while (cursor.moveToNext()) {
                 val data = cursor.getString(dataColumn) ?: continue
                 val path = runCatching { Paths.get(data) }.getOrNull() ?: continue
+                // Needed by Coil to load the video thumbnail, like the file list does.
+                val attributes = runCatching {
+                    Files.readAttributes(path, BasicFileAttributes::class.java)
+                }.getOrNull()
                 result += VideoEntry(
                     path,
+                    attributes,
                     cursor.getString(nameColumn) ?: data.substringAfterLast('/'),
                     data.substringBeforeLast('/'),
                     cursor.getLong(durationColumn)
@@ -191,6 +261,7 @@ private fun buildFolders(byFolder: Map<String, List<VideoEntry>>): List<FolderEn
 
 private class VideoEntry(
     val path: Path,
+    val attributes: BasicFileAttributes?,
     val name: String,
     val folder: String,
     val durationMs: Long
@@ -251,9 +322,10 @@ private fun createFolderTile(context: Context): LinearLayout = LinearLayout(cont
     )
 }
 
-private class VideoRowAdapter(
+private class VideoAdapter(
     private val context: Context,
-    private val videos: List<VideoEntry>
+    private val videos: List<VideoEntry>,
+    private val mode: VideoViewMode
 ) : BaseAdapter() {
     override fun getCount(): Int = videos.size
 
@@ -262,16 +334,45 @@ private class VideoRowAdapter(
     override fun getItemId(position: Int): Long = position.toLong()
 
     override fun getView(position: Int, convertView: View?, parent: ViewGroup?): View {
-        val view = convertView as? LinearLayout ?: createVideoRow(context)
         val video = videos[position]
+        // Reuse only views built for this mode (the tag records the mode).
+        return when (mode) {
+            VideoViewMode.COMPACT -> bindCompact(convertView, video)
+            VideoViewMode.GRID, VideoViewMode.GALLERY -> bindTile(convertView, video)
+        }
+    }
+
+    private fun bindCompact(convertView: View?, video: VideoEntry): View {
+        val view = (convertView?.takeIf { it.tag == mode } as? LinearLayout)
+            ?: createCompactRow(context).also { it.tag = mode }
         (view.getChildAt(0) as TextView).text = video.name
         (view.getChildAt(1) as TextView).text =
             DateUtils.formatElapsedTime(video.durationMs / 1000)
         return view
     }
+
+    private fun bindTile(convertView: View?, video: VideoEntry): View {
+        val withThumbnail = mode == VideoViewMode.GALLERY
+        val view = (convertView?.takeIf { it.tag == mode } as? LinearLayout)
+            ?: createTile(context, withThumbnail).also { it.tag = mode }
+        val image = view.getChildAt(0) as ImageView
+        image.dispose()
+        image.setImageResource(R.drawable.file_video_icon)
+        val attributes = video.attributes
+        if (withThumbnail && attributes != null) {
+            image.load(video.path to attributes) {
+                placeholder(R.drawable.file_video_icon)
+                error(R.drawable.file_video_icon)
+            }
+        }
+        (view.getChildAt(1) as TextView).text = video.name
+        (view.getChildAt(2) as TextView).text =
+            DateUtils.formatElapsedTime(video.durationMs / 1000)
+        return view
+    }
 }
 
-private fun createVideoRow(context: Context): LinearLayout = LinearLayout(context).apply {
+private fun createCompactRow(context: Context): LinearLayout = LinearLayout(context).apply {
     orientation = LinearLayout.VERTICAL
     setPadding(context.dp(16), context.dp(10), context.dp(16), context.dp(10))
     addView(
@@ -288,3 +389,31 @@ private fun createVideoRow(context: Context): LinearLayout = LinearLayout(contex
         }
     )
 }
+
+private fun createTile(context: Context, withThumbnail: Boolean): LinearLayout =
+    LinearLayout(context).apply {
+        orientation = LinearLayout.VERTICAL
+        setPadding(context.dp(4), context.dp(4), context.dp(4), context.dp(4))
+        val imageHeight = if (withThumbnail) context.dp(96) else context.dp(48)
+        addView(
+            ImageView(context).apply {
+                scaleType = ImageView.ScaleType.CENTER_CROP
+            },
+            LinearLayout.LayoutParams(MATCH, imageHeight)
+        )
+        addView(
+            TextView(context).apply {
+                textSize = 13f
+                maxLines = 2
+                ellipsize = TextUtils.TruncateAt.END
+            },
+            LinearLayout.LayoutParams(MATCH, WRAP).apply { topMargin = context.dp(4) }
+        )
+        addView(
+            TextView(context).apply {
+                textSize = 11f
+                alpha = 0.7f
+            },
+            LinearLayout.LayoutParams(MATCH, WRAP)
+        )
+    }
