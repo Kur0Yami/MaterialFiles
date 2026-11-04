@@ -1,7 +1,8 @@
 /*
  * "Video" standard directory: videos from MediaStore, grouped by folder.
  * Tap a folder to list its videos; tapping a video plays that folder as a playlist.
- * View options (mode, sort, subfolders, shortcut) live in the overflow menu.
+ * Video states: NEW badge (added recently, not watched), grey title (watched),
+ * blue title (last played), black title (default).
  */
 
 package me.zhanghai.android.files.videolibrary
@@ -9,6 +10,9 @@ package me.zhanghai.android.files.videolibrary
 import android.content.Context
 import android.content.Intent
 import android.content.SharedPreferences
+import android.graphics.Color
+import android.graphics.Typeface
+import android.graphics.drawable.GradientDrawable
 import android.os.Build
 import android.os.Bundle
 import android.provider.MediaStore
@@ -60,6 +64,8 @@ private const val WRAP = ViewGroup.LayoutParams.WRAP_CONTENT
 // Same cap as the image viewer, to avoid TransactionTooLargeException.
 private const val PLAYLIST_SIZE_MAX = 1000
 
+// Same SharedPreferences file the player writes positions and watched state to.
+private const val PLAYER_PREFS_NAME = "video_player_positions"
 private const val PREFS_NAME = "video_library"
 private const val PREF_VIEW_MODE = "view_mode"
 private const val PREF_SORT_BY = "sort_by"
@@ -69,6 +75,12 @@ private const val PREF_SHOW_SHORTCUT = "show_shortcut"
 
 private const val MENU_OPTIONS = 1
 private const val MENU_SHORTCUT = 2
+
+// A video counts as NEW for this long after it was added, until it is watched.
+private const val NEW_WINDOW_SECONDS = 7L * 24 * 60 * 60
+
+private const val NEW_BADGE_COLOR = 0xFFE5484D.toInt()
+private const val DURATION_BADGE_COLOR = 0x99000000.toInt()
 
 private enum class VideoViewMode(@StringRes val titleRes: Int, val columns: Int) {
     COMPACT(R.string.video_view_compact, 1),
@@ -89,6 +101,9 @@ class VideoLibraryActivity : AppActivity() {
     private lateinit var emptyText: TextView
 
     private val prefs: SharedPreferences by lazy { getSharedPreferences(PREFS_NAME, MODE_PRIVATE) }
+    private val playerPrefs: SharedPreferences by lazy {
+        getSharedPreferences(PLAYER_PREFS_NAME, MODE_PRIVATE)
+    }
     private var viewMode = VideoViewMode.COMPACT
     private var sortBy = SortBy.TITLE
     private var sortAscending = true
@@ -164,6 +179,14 @@ class VideoLibraryActivity : AppActivity() {
             refreshFolders()
             val pending = pendingFolderPath?.let { path -> folders.find { it.path == path } }
             if (pending != null) showFolder(pending) else showFolders()
+        }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        // Watched and last-played state may have changed in the player.
+        if (currentFolder != null) {
+            reloadVideoGrid()
         }
     }
 
@@ -356,7 +379,7 @@ class VideoLibraryActivity : AppActivity() {
         val folder = currentFolder ?: return
         folderVideos = videosFor(folder.path)
         videoGrid.numColumns = viewMode.columns
-        videoGrid.adapter = VideoAdapter(this, folderVideos, viewMode)
+        videoGrid.adapter = VideoAdapter(this, folderVideos, viewMode, playerPrefs)
     }
 
     private fun createShortcut() {
@@ -377,7 +400,8 @@ class VideoLibraryActivity : AppActivity() {
         val projection = arrayOf(
             MediaStore.Video.Media.DATA,
             MediaStore.Video.Media.DISPLAY_NAME,
-            MediaStore.Video.Media.DURATION
+            MediaStore.Video.Media.DURATION,
+            MediaStore.Video.Media.DATE_ADDED
         )
         val result = mutableListOf<VideoEntry>()
         contentResolver.query(
@@ -390,6 +414,7 @@ class VideoLibraryActivity : AppActivity() {
             val dataColumn = cursor.getColumnIndexOrThrow(MediaStore.Video.Media.DATA)
             val nameColumn = cursor.getColumnIndexOrThrow(MediaStore.Video.Media.DISPLAY_NAME)
             val durationColumn = cursor.getColumnIndexOrThrow(MediaStore.Video.Media.DURATION)
+            val dateAddedColumn = cursor.getColumnIndexOrThrow(MediaStore.Video.Media.DATE_ADDED)
             while (cursor.moveToNext()) {
                 val data = cursor.getString(dataColumn) ?: continue
                 val path = runCatching { Paths.get(data) }.getOrNull() ?: continue
@@ -402,7 +427,8 @@ class VideoLibraryActivity : AppActivity() {
                     attributes,
                     cursor.getString(nameColumn) ?: data.substringAfterLast('/'),
                     data.substringBeforeLast('/'),
-                    cursor.getLong(durationColumn)
+                    cursor.getLong(durationColumn),
+                    cursor.getLong(dateAddedColumn)
                 )
             }
         }
@@ -437,8 +463,12 @@ private class VideoEntry(
     val attributes: BasicFileAttributes?,
     val name: String,
     val folder: String,
-    val durationMs: Long
-)
+    val durationMs: Long,
+    val dateAddedSeconds: Long
+) {
+    // Same id the player uses for positions and watched state.
+    val mediaId: String = path.toUri().toString()
+}
 
 private class FolderEntry(
     val path: String,
@@ -498,8 +528,14 @@ private fun createFolderTile(context: Context): LinearLayout = LinearLayout(cont
 private class VideoAdapter(
     private val context: Context,
     private val videos: List<VideoEntry>,
-    private val mode: VideoViewMode
+    private val mode: VideoViewMode,
+    private val playerPrefs: SharedPreferences
 ) : BaseAdapter() {
+    private val lastPlayedId = playerPrefs.getString(VideoPlayerActivity.KEY_LAST_PLAYED, null)
+    private val colorDefault = context.getColorByAttr(android.R.attr.textColorPrimary)
+    private val colorWatched = context.getColorByAttr(android.R.attr.textColorSecondary)
+    private val colorLastPlayed = context.getColorByAttr(androidx.appcompat.R.attr.colorPrimary)
+
     override fun getCount(): Int = videos.size
 
     override fun getItem(position: Int): Any = videos[position]
@@ -515,10 +551,27 @@ private class VideoAdapter(
         }
     }
 
+    private fun isWatched(video: VideoEntry): Boolean =
+        playerPrefs.getBoolean(VideoPlayerActivity.watchedKey(video.mediaId), false)
+
+    private fun isNew(video: VideoEntry): Boolean {
+        val nowSeconds = System.currentTimeMillis() / 1000
+        return !isWatched(video) && nowSeconds - video.dateAddedSeconds < NEW_WINDOW_SECONDS
+    }
+
+    private fun titleColor(video: VideoEntry): Int = when {
+        video.mediaId == lastPlayedId -> colorLastPlayed
+        isWatched(video) -> colorWatched
+        else -> colorDefault
+    }
+
     private fun bindCompact(convertView: View?, video: VideoEntry): View {
         val view = (convertView?.takeIf { it.tag == mode } as? LinearLayout)
             ?: createCompactRow(context).also { it.tag = mode }
-        (view.getChildAt(0) as TextView).text = video.name
+        (view.getChildAt(0) as TextView).apply {
+            text = video.name
+            setTextColor(titleColor(video))
+        }
         (view.getChildAt(1) as TextView).text =
             DateUtils.formatElapsedTime(video.durationMs / 1000)
         return view
@@ -528,7 +581,11 @@ private class VideoAdapter(
         val withThumbnail = mode == VideoViewMode.GALLERY
         val view = (convertView?.takeIf { it.tag == mode } as? LinearLayout)
             ?: createTile(context, withThumbnail).also { it.tag = mode }
-        val image = view.getChildAt(0) as ImageView
+        val frame = view.getChildAt(0) as FrameLayout
+        val image = frame.getChildAt(0) as ImageView
+        val newBadge = frame.getChildAt(1) as TextView
+        val durationBadge = frame.getChildAt(2) as TextView
+
         image.dispose()
         image.setImageResource(R.drawable.file_video_icon)
         val attributes = video.attributes
@@ -538,9 +595,13 @@ private class VideoAdapter(
                 error(R.drawable.file_video_icon)
             }
         }
-        (view.getChildAt(1) as TextView).text = video.name
-        (view.getChildAt(2) as TextView).text =
-            DateUtils.formatElapsedTime(video.durationMs / 1000)
+        newBadge.visibility = if (isNew(video)) View.VISIBLE else View.GONE
+        durationBadge.text = DateUtils.formatElapsedTime(video.durationMs / 1000)
+        durationBadge.visibility = View.VISIBLE
+        (view.getChildAt(1) as TextView).apply {
+            text = video.name
+            setTextColor(titleColor(video))
+        }
         return view
     }
 }
@@ -563,14 +624,46 @@ private fun createCompactRow(context: Context): LinearLayout = LinearLayout(cont
     )
 }
 
+private fun createBadge(context: Context, text: CharSequence?, color: Int, gravity: Int) =
+    TextView(context).apply {
+        this.text = text
+        textSize = 10f
+        setTextColor(Color.WHITE)
+        setTypeface(Typeface.DEFAULT, Typeface.BOLD)
+        setPadding(context.dp(5), context.dp(2), context.dp(5), context.dp(2))
+        background = GradientDrawable().apply {
+            setColor(color)
+            cornerRadius = context.dp(4).toFloat()
+        }
+        visibility = View.GONE
+        layoutParams = FrameLayout.LayoutParams(WRAP, WRAP, gravity).apply {
+            setMargins(context.dp(6), context.dp(6), context.dp(6), context.dp(6))
+        }
+    }
+
+// The thumbnail frame holds the image plus the NEW badge (top start) and duration (bottom end).
 private fun createTile(context: Context, withThumbnail: Boolean): LinearLayout =
     LinearLayout(context).apply {
         orientation = LinearLayout.VERTICAL
         setPadding(context.dp(4), context.dp(4), context.dp(4), context.dp(4))
-        val imageHeight = if (withThumbnail) context.dp(96) else context.dp(48)
+        val imageHeight = if (withThumbnail) context.dp(96) else context.dp(64)
         addView(
-            ImageView(context).apply {
-                scaleType = ImageView.ScaleType.CENTER_CROP
+            FrameLayout(context).apply {
+                addView(
+                    ImageView(context).apply { scaleType = ImageView.ScaleType.CENTER_CROP },
+                    FrameLayout.LayoutParams(MATCH, MATCH)
+                )
+                addView(
+                    createBadge(
+                        context,
+                        context.getString(R.string.video_badge_new),
+                        NEW_BADGE_COLOR,
+                        Gravity.TOP or Gravity.START
+                    )
+                )
+                addView(
+                    createBadge(context, null, DURATION_BADGE_COLOR, Gravity.BOTTOM or Gravity.END)
+                )
             },
             LinearLayout.LayoutParams(MATCH, imageHeight)
         )
@@ -581,12 +674,5 @@ private fun createTile(context: Context, withThumbnail: Boolean): LinearLayout =
                 ellipsize = TextUtils.TruncateAt.END
             },
             LinearLayout.LayoutParams(MATCH, WRAP).apply { topMargin = context.dp(4) }
-        )
-        addView(
-            TextView(context).apply {
-                textSize = 11f
-                alpha = 0.7f
-            },
-            LinearLayout.LayoutParams(MATCH, WRAP)
         )
     }

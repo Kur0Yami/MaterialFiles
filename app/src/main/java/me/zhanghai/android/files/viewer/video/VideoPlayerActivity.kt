@@ -1704,9 +1704,11 @@ class VideoPlayerActivity : AppActivity() {
         val item = p.currentMediaItem ?: return
         val duration = if (p.duration == C.TIME_UNSET || p.duration < 0) 0L else p.duration
         val position = p.currentPosition
-        if (p.playbackState == Player.STATE_ENDED ||
-            (duration > 0 && position > duration - 10_000L) || position < 5_000L
-        ) {
+        val finished = p.playbackState == Player.STATE_ENDED ||
+            (duration > 0 && position > duration - 10_000L)
+        if (finished) {
+            prefs.edit().remove(item.mediaId).putBoolean(watchedKey(item.mediaId), true).apply()
+        } else if (position < 5_000L) {
             prefs.edit().remove(item.mediaId).apply()
         } else {
             prefs.edit().putLong(item.mediaId, position).apply()
@@ -1744,6 +1746,7 @@ class VideoPlayerActivity : AppActivity() {
         override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
             updateTitle()
             updateProgress()
+            mediaItem?.mediaId?.let { prefs.edit().putString(KEY_LAST_PLAYED, it).apply() }
         }
 
         override fun onPositionDiscontinuity(
@@ -1752,7 +1755,9 @@ class VideoPlayerActivity : AppActivity() {
             reason: Int
         ) {
             if (reason == Player.DISCONTINUITY_REASON_AUTO_TRANSITION) {
-                oldPosition.mediaItem?.mediaId?.let { prefs.edit().remove(it).apply() }
+                oldPosition.mediaItem?.mediaId?.let {
+                    prefs.edit().remove(it).putBoolean(watchedKey(it), true).apply()
+                }
             }
         }
 
@@ -1807,6 +1812,11 @@ class VideoPlayerActivity : AppActivity() {
     companion object {
         private val EXTRA_POSITION = "${VideoPlayerActivity::class.java.name}.extra.POSITION"
         private const val PREFS_NAME = "video_player_positions"
+
+        // Shared with the video library (blue = last played, grey = watched).
+        const val KEY_LAST_PLAYED = "last_played"
+
+        fun watchedKey(mediaId: String): String = "watched:$mediaId"
 
         private const val DRAG_NONE = 0
         private const val DRAG_SEEK = 1

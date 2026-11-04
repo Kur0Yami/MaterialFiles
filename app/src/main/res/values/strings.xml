@@ -741,6 +741,7 @@
     <string name="video_include_subfolders">Include subfolders</string>
     <string name="video_show_shortcut">Show shortcut</string>
     <string name="video_add_shortcut">Add shortcut</string>
+    <string name="video_badge_new">NEW</string>
     <string name="video_library_empty">No videos found. Make sure storage access is granted and the media has been scanned.</string>
     <string name="navigation_standard_directory_music">Music</string>
     <string name="navigation_standard_directory_notifications">Notifications</string>
