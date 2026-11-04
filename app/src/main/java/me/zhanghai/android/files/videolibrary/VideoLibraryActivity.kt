@@ -132,7 +132,9 @@ private class VideoEntry(
 )
 
 private class VideoAdapter(context: Context, entries: List<VideoEntry>) :
-    ArrayAdapter<VideoEntry>(context, android.R.layout.simple_list_item_2, entries) {
+    ArrayAdapter<VideoEntry>(
+        context, android.R.layout.simple_list_item_2, android.R.id.text1, entries
+    ) {
     override fun getView(position: Int, convertView: View?, parent: ViewGroup): View {
         val view = super.getView(position, convertView, parent)
         val entry = getItem(position)!!
