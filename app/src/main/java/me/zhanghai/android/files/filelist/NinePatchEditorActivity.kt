@@ -32,7 +32,7 @@ import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import kotlin.concurrent.thread
 import kotlin.math.ceil
-import kotlin.math.hypot
+import kotlin.math.floor
 import kotlin.math.max
 import kotlin.math.min
 
@@ -45,7 +45,7 @@ class NinePatchEditorActivity : AppActivity() {
     private var isNinePatchSource = false
     private lateinit var editor: NinePatchEditorView
     private lateinit var titleText: TextView
-    private lateinit var drawButton: Button
+    private val modeButtons = ArrayList<Button>()
     private lateinit var eraseButton: Button
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -100,38 +100,48 @@ class NinePatchEditorActivity : AppActivity() {
         })
         root.addView(bar)
         root.addView(TextView(this).apply {
-            text = "Top/left = stretch area, bottom/right = padding. Drag on the edge to mark; two fingers to pan/zoom."
+            text = "Pick Horizontal / Vertical / Padding, then drag on the image. Erase removes. Two fingers: pan/zoom."
             textSize = 12f
             alpha = 0.7f
             setPadding(dp(16), 0, dp(16), dp(4))
         })
         editor = NinePatchEditorView(this)
         root.addView(editor, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
-        val tools = LinearLayout(this).apply {
+        fun newRow(): LinearLayout = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
-            setPadding(dp(8), dp(4), dp(8), dp(4))
+            setPadding(dp(8), 0, dp(8), 0)
         }
-        fun tool(label: String, onClick: () -> Unit): Button = Button(this).apply {
+        fun tool(row: LinearLayout, label: String, onClick: () -> Unit): Button = Button(this).apply {
             text = label
             isAllCaps = false
             setOnClickListener { onClick() }
-            tools.addView(
+            row.addView(
                 this, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
             )
         }
-        drawButton = tool("Draw") { setErase(false) }
-        eraseButton = tool("Erase") { setErase(true) }
-        tool("Preview") { showPreview() }
-        tool("Clear") { editor.clearMarks() }
-        setErase(false)
-        root.addView(tools)
+        val row1 = newRow()
+        modeButtons.add(tool(row1, "Horizontal") { setMode(0) })
+        modeButtons.add(tool(row1, "Vertical") { setMode(1) })
+        modeButtons.add(tool(row1, "Padding") { setMode(2) })
+        val row2 = newRow()
+        eraseButton = tool(row2, "Erase: off") { toggleErase() }
+        tool(row2, "Preview") { showPreview() }
+        tool(row2, "Clear") { editor.clearMarks() }
+        setMode(0)
+        root.addView(row1)
+        root.addView(row2)
         setContentView(root)
     }
 
-    private fun setErase(erase: Boolean) {
-        editor.erase = erase
-        drawButton.alpha = if (erase) 0.5f else 1f
-        eraseButton.alpha = if (erase) 1f else 0.5f
+    private fun setMode(mode: Int) {
+        editor.mode = mode
+        modeButtons.forEachIndexed { index, button -> button.alpha = if (index == mode) 1f else 0.5f }
+    }
+
+    private fun toggleErase() {
+        editor.erase = !editor.erase
+        eraseButton.text = if (editor.erase) "Erase: on" else "Erase: off"
+        eraseButton.alpha = if (editor.erase) 1f else 0.7f
     }
 
     private fun save() {
@@ -210,6 +220,7 @@ class NinePatchEditorActivity : AppActivity() {
 
 private class NinePatchEditorView(context: Context) : View(context) {
     var erase = false
+    var mode = 0 // 0 = horizontal stretch, 1 = vertical stretch, 2 = padding
     private var content: Bitmap? = null
     private var top = BooleanArray(0)
     private var left = BooleanArray(0)
@@ -228,8 +239,11 @@ private class NinePatchEditorView(context: Context) : View(context) {
     private val line = Paint().apply { style = Paint.Style.STROKE; strokeWidth = 1f }
     private val destRect = RectF()
 
-    private var lastX = 0f
-    private var lastY = 0f
+    private var dragging = false
+    private var dragX0 = 0f
+    private var dragY0 = 0f
+    private var dragX1 = 0f
+    private var dragY1 = 0f
     private var panning = false
     private var lastFocusX = 0f
     private var lastFocusY = 0f
@@ -351,25 +365,39 @@ private class NinePatchEditorView(context: Context) : View(context) {
         destRect.set(l, t, r, b)
         canvas.drawBitmap(bitmap, null, destRect, bitmapPaint)
 
-        // Stretch (red) and padding (blue) guides over the content.
+        // Stretch guides (red) and padding box (blue) over the content.
+        fill.color = 0x44FF0000
         for (i in 0 until w) {
-            if (top[i]) {
-                fill.color = 0x33FF0000
-                canvas.drawRect(l + i * scale, t, l + (i + 1) * scale, b, fill)
-            }
-            if (bottom[i]) {
-                fill.color = 0x330000FF
-                canvas.drawRect(l + i * scale, t, l + (i + 1) * scale, b, fill)
-            }
+            if (top[i]) canvas.drawRect(l + i * scale, t, l + (i + 1) * scale, b, fill)
         }
         for (j in 0 until h) {
-            if (left[j]) {
-                fill.color = 0x33FF0000
-                canvas.drawRect(l, t + j * scale, r, t + (j + 1) * scale, fill)
-            }
-            if (right[j]) {
-                fill.color = 0x330000FF
-                canvas.drawRect(l, t + j * scale, r, t + (j + 1) * scale, fill)
+            if (left[j]) canvas.drawRect(l, t + j * scale, r, t + (j + 1) * scale, fill)
+        }
+        val padX0 = bottom.indexOfFirst { it }
+        val padY0 = right.indexOfFirst { it }
+        if (padX0 >= 0 || padY0 >= 0) {
+            val px0 = if (padX0 >= 0) padX0 else 0
+            val px1 = if (padX0 >= 0) bottom.indexOfLast { it } + 1 else w
+            val py0 = if (padY0 >= 0) padY0 else 0
+            val py1 = if (padY0 >= 0) right.indexOfLast { it } + 1 else h
+            val pr = RectF(l + px0 * scale, t + py0 * scale, l + px1 * scale, t + py1 * scale)
+            fill.color = 0x330000FF
+            canvas.drawRect(pr, fill)
+            line.color = 0xFF2255FF.toInt()
+            canvas.drawRect(pr, line)
+        }
+
+        // Selection being dragged.
+        if (dragging) {
+            val x0 = l + min(dragX0, dragX1) * scale
+            val x1 = l + max(dragX0, dragX1) * scale
+            val y0 = t + min(dragY0, dragY1) * scale
+            val y1 = t + max(dragY0, dragY1) * scale
+            fill.color = if (erase) 0x66888888 else if (mode == 2) 0x660000FF else 0x66FF0000
+            when (mode) {
+                0 -> canvas.drawRect(x0, t, max(x1, x0 + 1f), b, fill)
+                1 -> canvas.drawRect(l, y0, r, max(y1, y0 + 1f), fill)
+                else -> canvas.drawRect(x0, y0, max(x1, x0 + 1f), max(y1, y0 + 1f), fill)
             }
         }
 
@@ -402,6 +430,12 @@ private class NinePatchEditorView(context: Context) : View(context) {
         }
     }
 
+    private fun contentX(x: Float): Float =
+        ((x - (tx + scale)) / scale).coerceIn(0f, (content?.width ?: 0).toFloat())
+
+    private fun contentY(y: Float): Float =
+        ((y - (ty + scale)) / scale).coerceIn(0f, (content?.height ?: 0).toFloat())
+
     override fun onTouchEvent(event: MotionEvent): Boolean {
         if (content == null) {
             return false
@@ -410,6 +444,7 @@ private class NinePatchEditorView(context: Context) : View(context) {
             panning = false
         }
         if (event.pointerCount > 1) {
+            dragging = false
             parent?.requestDisallowInterceptTouchEvent(true)
             scaleDetector.onTouchEvent(event)
             var fx = 0f
@@ -423,11 +458,11 @@ private class NinePatchEditorView(context: Context) : View(context) {
             if (panning) {
                 tx += fx - lastFocusX
                 ty += fy - lastFocusY
-                invalidate()
             }
             lastFocusX = fx
             lastFocusY = fy
             panning = true
+            invalidate()
             return true
         }
         if (panning) {
@@ -440,57 +475,55 @@ private class NinePatchEditorView(context: Context) : View(context) {
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
                 parent?.requestDisallowInterceptTouchEvent(true)
-                lastX = event.x
-                lastY = event.y
-                markAt(event.x, event.y)
+                dragging = true
+                dragX0 = contentX(event.x)
+                dragY0 = contentY(event.y)
+                dragX1 = dragX0
+                dragY1 = dragY0
+                invalidate()
             }
-            MotionEvent.ACTION_MOVE -> {
-                val dx = event.x - lastX
-                val dy = event.y - lastY
-                val steps = min(400, max(1, ceil(hypot(dx, dy) / max(1f, scale / 2f)).toInt()))
-                for (s in 1..steps) {
-                    markAt(lastX + dx * s / steps, lastY + dy * s / steps)
+            MotionEvent.ACTION_MOVE -> if (dragging) {
+                dragX1 = contentX(event.x)
+                dragY1 = contentY(event.y)
+                invalidate()
+            }
+            MotionEvent.ACTION_UP -> {
+                if (dragging) {
+                    dragX1 = contentX(event.x)
+                    dragY1 = contentY(event.y)
+                    commitDrag()
                 }
-                lastX = event.x
-                lastY = event.y
+                dragging = false
+                invalidate()
+            }
+            MotionEvent.ACTION_CANCEL -> {
+                dragging = false
+                invalidate()
             }
         }
         return true
     }
 
-    // Border strips accept touches slightly outside the image, so thin borders are easy to hit.
-    private fun markAt(x: Float, y: Float) {
+    // Turns the dragged span/rectangle (in image pixels) into marks.
+    private fun commitDrag() {
         val bitmap = content ?: return
         val w = bitmap.width
         val h = bitmap.height
-        val slop = 28 * density
-        val l = tx + scale
-        val t = ty + scale
-        val r = tx + (w + 1) * scale
-        val b = ty + (h + 1) * scale
-        val value = !erase
-        var changed = false
-        if (x >= l && x < r) {
-            val i = ((x - l) / scale).toInt().coerceIn(0, w - 1)
-            if (y >= ty - slop && y < t) {
-                changed = top[i] != value
-                top[i] = value
-            } else if (y >= b && y < b + scale + slop) {
-                changed = bottom[i] != value
-                bottom[i] = value
+        val i0 = floor(min(dragX0, dragX1)).toInt().coerceIn(0, w - 1)
+        val i1 = ceil(max(dragX0, dragX1)).toInt().coerceIn(i0 + 1, w)
+        val j0 = floor(min(dragY0, dragY1)).toInt().coerceIn(0, h - 1)
+        val j1 = ceil(max(dragY0, dragY1)).toInt().coerceIn(j0 + 1, h)
+        when (mode) {
+            0 -> for (i in i0 until i1) top[i] = !erase
+            1 -> for (j in j0 until j1) left[j] = !erase
+            else -> {
+                bottom.fill(false)
+                right.fill(false)
+                if (!erase) {
+                    for (i in i0 until i1) bottom[i] = true
+                    for (j in j0 until j1) right[j] = true
+                }
             }
-        } else if (y >= t && y < b) {
-            val j = ((y - t) / scale).toInt().coerceIn(0, h - 1)
-            if (x >= tx - slop && x < l) {
-                changed = left[j] != value
-                left[j] = value
-            } else if (x >= r && x < r + scale + slop) {
-                changed = right[j] != value
-                right[j] = value
-            }
-        }
-        if (changed) {
-            invalidate()
         }
     }
 
