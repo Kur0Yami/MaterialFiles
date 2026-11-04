@@ -14,6 +14,7 @@ import android.content.pm.ActivityInfo
 import android.content.pm.PackageManager
 import android.content.res.ColorStateList
 import android.content.res.Configuration
+import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Outline
@@ -25,12 +26,14 @@ import android.graphics.drawable.ColorDrawable
 import android.graphics.drawable.GradientDrawable
 import android.graphics.drawable.RippleDrawable
 import android.media.AudioManager
+import android.media.MediaMetadataRetriever
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.provider.Settings
 import android.text.TextUtils
+import android.util.LruCache
 import android.util.Rational
 import android.view.GestureDetector
 import android.view.Gravity
@@ -74,6 +77,8 @@ import androidx.media3.ui.PlayerView
 import java8.nio.file.Files
 import java8.nio.file.Path
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import me.zhanghai.android.files.R
@@ -171,6 +176,17 @@ class VideoPlayerActivity : AppActivity() {
     private var seekAmount: Long? = null
     private var seekStartX = 0f
     private var pendingSeekPosition: Long? = null
+
+    // Seekbar preview: one frame per second, cached per video.
+    private val previewLock = Any()
+    private var previewRetriever: MediaMetadataRetriever? = null
+    private var previewPath: String? = null
+    private var previewCachePath: String? = null
+    private val previewCache = LruCache<Long, Bitmap>(PREVIEW_CACHE_SIZE)
+    private var previewJob: Job? = null
+    private lateinit var previewBox: LinearLayout
+    private lateinit var previewView: ImageView
+    private lateinit var previewTime: TextView
 
     // Double tap / long press.
     private var doubleTapSeekMs = 0L
@@ -512,6 +528,7 @@ class VideoPlayerActivity : AppActivity() {
         root.addView(lockedLayer, matchParent())
 
         buildOverlay()
+        buildPreview()
 
         ViewCompat.setOnApplyWindowInsetsListener(root) { _, insets ->
             val bars = insets.getInsets(
@@ -531,6 +548,108 @@ class VideoPlayerActivity : AppActivity() {
             gestB = max(g.bottom, sg.bottom)
             applyInsets()
             insets
+        }
+    }
+
+    private fun buildPreview() {
+        previewView = ImageView(this).apply {
+            scaleType = ImageView.ScaleType.CENTER_CROP
+            background = ColorDrawable(Color.BLACK)
+        }
+        previewTime = label(14f, Color.WHITE, medium())
+        previewBox = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER_HORIZONTAL
+            visibility = View.GONE
+            addView(previewView, LinearLayout.LayoutParams(dp(PREVIEW_WIDTH_DP), dp(90)))
+            addView(
+                previewTime,
+                LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT
+                ).apply { topMargin = dp(4) }
+            )
+        }
+        root.addView(
+            previewBox,
+            FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT,
+                Gravity.BOTTOM or Gravity.START
+            ).apply { bottomMargin = dp(104) }
+        )
+    }
+
+    private fun showPreview(positionMs: Long) {
+        val p = player ?: return
+        val path = paths.getOrNull(p.currentMediaItemIndex)?.toString() ?: return
+        if (path != previewCachePath) {
+            previewCache.evictAll()
+            previewCachePath = path
+        }
+        previewBox.visibility = View.VISIBLE
+        previewTime.text = formatTime(positionMs)
+        previewBox.post { positionPreviewBox(positionMs) }
+        val bucket = positionMs / 1000
+        previewCache.get(bucket)?.let {
+            previewView.setImageBitmap(it)
+            return
+        }
+        previewJob?.cancel()
+        previewJob = lifecycleScope.launch {
+            delay(PREVIEW_DEBOUNCE_MS)
+            val frame = withContext(Dispatchers.IO) { loadPreviewFrame(path, bucket * 1000) }
+            if (frame != null) {
+                previewCache.put(bucket, frame)
+                previewView.setImageBitmap(frame)
+            }
+        }
+    }
+
+    private fun hidePreview() {
+        previewJob?.cancel()
+        previewJob = null
+        previewBox.visibility = View.GONE
+    }
+
+    // Keep the preview centered over the seekbar thumb, inside the screen.
+    private fun positionPreviewBox(positionMs: Long) {
+        val duration = player?.duration ?: return
+        if (duration <= 0) return
+        val fraction = (positionMs.toFloat() / duration).coerceIn(0f, 1f)
+        val seekLocation = IntArray(2)
+        val rootLocation = IntArray(2)
+        seekBar.getLocationInWindow(seekLocation)
+        root.getLocationInWindow(rootLocation)
+        val thumbX = (seekLocation[0] - rootLocation[0]) + seekBar.width * fraction
+        previewBox.translationX =
+            (thumbX - previewBox.width / 2f).coerceIn(0f, (root.width - previewBox.width).toFloat())
+    }
+
+    // Runs on a background thread. The retriever is shared, so access is serialized.
+    private fun loadPreviewFrame(path: String, positionMs: Long): Bitmap? = synchronized(previewLock) {
+        try {
+            val retriever = previewRetriever?.takeIf { previewPath == path } ?: run {
+                previewRetriever?.release()
+                MediaMetadataRetriever().apply { setDataSource(path) }.also {
+                    previewRetriever = it
+                    previewPath = path
+                }
+            }
+            val frame = retriever.getFrameAtTime(
+                positionMs * 1000, MediaMetadataRetriever.OPTION_CLOSEST_SYNC
+            ) ?: return@synchronized null
+            val width = dp(PREVIEW_WIDTH_DP)
+            val height = width * frame.height / max(1, frame.width)
+            Bitmap.createScaledBitmap(frame, width, height, true)
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    private fun releasePreview() {
+        synchronized(previewLock) {
+            previewRetriever?.release()
+            previewRetriever = null
+            previewPath = null
         }
     }
 
@@ -1126,10 +1245,12 @@ class VideoPlayerActivity : AppActivity() {
         val position = value.coerceIn(0L, duration)
         seekAmount = position - seekStartPosition
         updateInfo()
+        showPreview(position)
     }
 
     // Seek once, when the finger is released, instead of on every move.
     private fun commitSeek(value: Long) {
+        hidePreview()
         val p = player
         if (p != null && isSeeking && p.duration > 0) {
             p.seekTo(value.coerceIn(0L, p.duration))
@@ -1817,6 +1938,7 @@ class VideoPlayerActivity : AppActivity() {
     override fun onDestroy() {
         super.onDestroy()
         handler.removeCallbacksAndMessages(null)
+        releasePreview()
         player?.let {
             it.removeListener(playerListener)
             it.release()
@@ -1840,6 +1962,9 @@ class VideoPlayerActivity : AppActivity() {
         private const val SEEK_INCREMENT_MS = 10_000L
         private const val MIN_ZOOM = 0.25f
         private const val MAX_ZOOM = 4f
+        private const val PREVIEW_DEBOUNCE_MS = 120L
+        private const val PREVIEW_CACHE_SIZE = 30
+        private const val PREVIEW_WIDTH_DP = 160
 
         private val SUBTITLE_TYPES = listOf(
             "srt" to MimeTypes.APPLICATION_SUBRIP,
