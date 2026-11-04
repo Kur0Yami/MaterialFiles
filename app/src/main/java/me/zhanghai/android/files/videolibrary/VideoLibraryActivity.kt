@@ -1,13 +1,15 @@
 /*
  * "Video" standard directory: videos from MediaStore, grouped by folder.
- * Tap a folder to list its videos (compact / grid / gallery); tapping a video plays that
- * folder as a playlist.
+ * Tap a folder to list its videos; tapping a video plays that folder as a playlist.
+ * View options (mode, sort, subfolders, shortcut) live in the overflow menu.
  */
 
 package me.zhanghai.android.files.videolibrary
 
 import android.content.Context
+import android.content.Intent
 import android.content.SharedPreferences
+import android.os.Build
 import android.os.Bundle
 import android.provider.MediaStore
 import android.text.TextUtils
@@ -22,11 +24,18 @@ import android.widget.FrameLayout
 import android.widget.GridView
 import android.widget.ImageView
 import android.widget.LinearLayout
-import android.widget.ListView
+import android.widget.RadioButton
+import android.widget.ScrollView
 import android.widget.TextView
+import android.widget.Toast
 import androidx.activity.OnBackPressedCallback
 import androidx.annotation.StringRes
+import androidx.appcompat.app.AlertDialog
+import androidx.appcompat.widget.SwitchCompat
 import androidx.appcompat.widget.Toolbar
+import androidx.core.content.pm.ShortcutInfoCompat
+import androidx.core.content.pm.ShortcutManagerCompat
+import androidx.core.graphics.drawable.IconCompat
 import androidx.lifecycle.lifecycleScope
 import coil.dispose
 import coil.load
@@ -53,12 +62,23 @@ private const val PLAYLIST_SIZE_MAX = 1000
 
 private const val PREFS_NAME = "video_library"
 private const val PREF_VIEW_MODE = "view_mode"
-private const val MENU_GROUP_VIEW_MODE = 1
+private const val PREF_SORT_BY = "sort_by"
+private const val PREF_SORT_ASCENDING = "sort_ascending"
+private const val PREF_INCLUDE_SUBFOLDERS = "include_subfolders"
+private const val PREF_SHOW_SHORTCUT = "show_shortcut"
+
+private const val MENU_OPTIONS = 1
+private const val MENU_SHORTCUT = 2
 
 private enum class VideoViewMode(@StringRes val titleRes: Int, val columns: Int) {
     COMPACT(R.string.video_view_compact, 1),
     GRID(R.string.video_view_grid, 2),
     GALLERY(R.string.video_view_gallery, 3)
+}
+
+private enum class SortBy(@StringRes val titleRes: Int) {
+    TITLE(R.string.video_sort_title),
+    LENGTH(R.string.video_sort_length)
 }
 
 @Suppress("DEPRECATION")
@@ -70,8 +90,13 @@ class VideoLibraryActivity : AppActivity() {
 
     private val prefs: SharedPreferences by lazy { getSharedPreferences(PREFS_NAME, MODE_PRIVATE) }
     private var viewMode = VideoViewMode.COMPACT
+    private var sortBy = SortBy.TITLE
+    private var sortAscending = true
+    private var includeSubfolders = false
+    private var showShortcut = false
+    private var optionsDialog: AlertDialog? = null
 
-    private var videosByFolder: Map<String, List<VideoEntry>> = emptyMap()
+    private var allVideos: List<VideoEntry> = emptyList()
     private var folders: List<FolderEntry> = emptyList()
     // Videos of the folder currently open; also the playlist for playback.
     private var folderVideos: List<VideoEntry> = emptyList()
@@ -80,9 +105,7 @@ class VideoLibraryActivity : AppActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        viewMode = prefs.getString(PREF_VIEW_MODE, null)
-            ?.let { name -> VideoViewMode.entries.find { it.name == name } }
-            ?: VideoViewMode.COMPACT
+        loadPreferences()
 
         toolbar = Toolbar(this).apply {
             setBackgroundColor(getColorByAttr(R.attr.colorAppBarSurface))
@@ -135,35 +158,38 @@ class VideoLibraryActivity : AppActivity() {
             }
         })
 
+        val pendingFolderPath = intent.getStringExtra(EXTRA_FOLDER)
         lifecycleScope.launch {
-            val videos = withContext(Dispatchers.IO) { queryVideos() }
-            videosByFolder = videos.groupBy { it.folder }
-            folders = buildFolders(videosByFolder)
-            folderGrid.adapter = FolderAdapter(this@VideoLibraryActivity, folders)
-            showFolders()
+            allVideos = withContext(Dispatchers.IO) { queryVideos() }
+            refreshFolders()
+            val pending = pendingFolderPath?.let { path -> folders.find { it.path == path } }
+            if (pending != null) showFolder(pending) else showFolders()
         }
     }
 
     override fun onCreateOptionsMenu(menu: Menu): Boolean {
-        for (mode in VideoViewMode.entries) {
-            menu.add(MENU_GROUP_VIEW_MODE, mode.ordinal, Menu.NONE, mode.titleRes)
-        }
-        menu.setGroupCheckable(MENU_GROUP_VIEW_MODE, true, true)
+        menu.add(0, MENU_OPTIONS, Menu.NONE, R.string.video_options_title)
+            .setShowAsAction(MenuItem.SHOW_AS_ACTION_NEVER)
+        menu.add(0, MENU_SHORTCUT, Menu.NONE, R.string.video_add_shortcut)
+            .setShowAsAction(MenuItem.SHOW_AS_ACTION_NEVER)
         return true
     }
 
     override fun onPrepareOptionsMenu(menu: Menu): Boolean {
-        // View modes only apply inside a folder.
-        menu.setGroupVisible(MENU_GROUP_VIEW_MODE, currentFolder != null)
-        menu.findItem(viewMode.ordinal)?.isChecked = true
+        menu.findItem(MENU_SHORTCUT)?.isVisible = showShortcut
         return true
     }
 
-    override fun onOptionsItemSelected(item: MenuItem): Boolean {
-        val mode = VideoViewMode.entries.getOrNull(item.itemId)
-            ?: return super.onOptionsItemSelected(item)
-        setViewMode(mode)
-        return true
+    override fun onOptionsItemSelected(item: MenuItem): Boolean = when (item.itemId) {
+        MENU_OPTIONS -> {
+            showOptionsDialog()
+            true
+        }
+        MENU_SHORTCUT -> {
+            createShortcut()
+            true
+        }
+        else -> super.onOptionsItemSelected(item)
     }
 
     override fun onSupportNavigateUp(): Boolean {
@@ -174,14 +200,137 @@ class VideoLibraryActivity : AppActivity() {
         return super.onSupportNavigateUp()
     }
 
+    private fun loadPreferences() {
+        viewMode = prefs.getString(PREF_VIEW_MODE, null)
+            ?.let { name -> VideoViewMode.entries.find { it.name == name } }
+            ?: VideoViewMode.COMPACT
+        sortBy = prefs.getString(PREF_SORT_BY, null)
+            ?.let { name -> SortBy.entries.find { it.name == name } }
+            ?: SortBy.TITLE
+        sortAscending = prefs.getBoolean(PREF_SORT_ASCENDING, true)
+        includeSubfolders = prefs.getBoolean(PREF_INCLUDE_SUBFOLDERS, false)
+        showShortcut = prefs.getBoolean(PREF_SHOW_SHORTCUT, false)
+    }
+
+    private fun savePreference(key: String, value: Any) {
+        val editor = prefs.edit()
+        when (value) {
+            is String -> editor.putString(key, value)
+            is Boolean -> editor.putBoolean(key, value)
+        }
+        editor.apply()
+    }
+
+    private fun showOptionsDialog() {
+        val content = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(16), dp(8), dp(16), dp(8))
+
+            addView(sectionTitle(R.string.video_section_view))
+            for (mode in VideoViewMode.entries) {
+                addView(radio(getString(mode.titleRes), viewMode == mode) {
+                    setViewMode(mode)
+                    optionsDialog?.dismiss()
+                })
+            }
+
+            addView(sectionTitle(R.string.video_section_sort))
+            for (by in SortBy.entries) {
+                addView(radio(getString(by.titleRes), sortBy == by) {
+                    setSortBy(by)
+                    optionsDialog?.dismiss()
+                })
+            }
+            addView(radio(getString(R.string.video_sort_asc), sortAscending) {
+                setSortAscending(true)
+                optionsDialog?.dismiss()
+            })
+            addView(radio(getString(R.string.video_sort_desc), !sortAscending) {
+                setSortAscending(false)
+                optionsDialog?.dismiss()
+            })
+
+            addView(sectionTitle(R.string.video_section_more))
+            addView(SwitchCompat(this@VideoLibraryActivity).apply {
+                text = getString(R.string.video_include_subfolders)
+                isChecked = includeSubfolders
+                setOnCheckedChangeListener { _, checked -> setIncludeSubfolders(checked) }
+            })
+            addView(SwitchCompat(this@VideoLibraryActivity).apply {
+                text = getString(R.string.video_show_shortcut)
+                isChecked = showShortcut
+                setOnCheckedChangeListener { _, checked ->
+                    showShortcut = checked
+                    savePreference(PREF_SHOW_SHORTCUT, checked)
+                    invalidateOptionsMenu()
+                }
+            })
+        }
+        optionsDialog = AlertDialog.Builder(this)
+            .setTitle(R.string.video_options_title)
+            .setView(ScrollView(this).apply { addView(content) })
+            .setPositiveButton(android.R.string.ok, null)
+            .show()
+    }
+
+    private fun sectionTitle(@StringRes res: Int): TextView = TextView(this).apply {
+        setText(res)
+        textSize = 13f
+        alpha = 0.7f
+        setPadding(0, dp(12), 0, dp(4))
+    }
+
+    private fun radio(text: String, checked: Boolean, onClick: () -> Unit): RadioButton =
+        RadioButton(this).apply {
+            this.text = text
+            isChecked = checked
+            setOnClickListener { onClick() }
+        }
+
     private fun setViewMode(mode: VideoViewMode) {
         viewMode = mode
-        prefs.edit().putString(PREF_VIEW_MODE, mode.name).apply()
-        videoGrid.numColumns = mode.columns
-        if (currentFolder != null) {
-            videoGrid.adapter = VideoAdapter(this, folderVideos, mode)
-        }
+        savePreference(PREF_VIEW_MODE, mode.name)
+        reloadVideoGrid()
         invalidateOptionsMenu()
+    }
+
+    private fun setSortBy(by: SortBy) {
+        sortBy = by
+        savePreference(PREF_SORT_BY, by.name)
+        reloadVideoGrid()
+    }
+
+    private fun setSortAscending(ascending: Boolean) {
+        sortAscending = ascending
+        savePreference(PREF_SORT_ASCENDING, ascending)
+        reloadVideoGrid()
+    }
+
+    private fun setIncludeSubfolders(include: Boolean) {
+        includeSubfolders = include
+        savePreference(PREF_INCLUDE_SUBFOLDERS, include)
+        refreshFolders()
+        reloadVideoGrid()
+    }
+
+    private fun refreshFolders() {
+        val folderPaths = allVideos.map { it.folder }.distinct()
+        folders = folderPaths
+            .map { path -> FolderEntry(path, path.substringAfterLast('/'), videosFor(path).size) }
+            .sortedBy { it.name.lowercase() }
+        folderGrid.adapter = FolderAdapter(this, folders)
+    }
+
+    // Videos belonging to a folder, including subfolders when that option is on.
+    private fun videosFor(folder: String): List<VideoEntry> {
+        val matched = allVideos.filter {
+            it.folder == folder || (includeSubfolders && it.folder.startsWith("$folder/"))
+        }
+        val sorted = when (sortBy) {
+            SortBy.TITLE -> matched.sortedBy { it.name.lowercase() }
+            SortBy.LENGTH -> matched.sortedBy { it.durationMs }
+        }
+        return if (sortAscending) sorted else sorted.reversed()
     }
 
     private fun showFolders() {
@@ -196,13 +345,32 @@ class VideoLibraryActivity : AppActivity() {
     private fun showFolder(folder: FolderEntry) {
         currentFolder = folder
         toolbar.title = folder.name
-        folderVideos = videosByFolder[folder.path].orEmpty()
-        videoGrid.numColumns = viewMode.columns
-        videoGrid.adapter = VideoAdapter(this, folderVideos, viewMode)
         folderGrid.visibility = View.GONE
         videoGrid.visibility = View.VISIBLE
         emptyText.visibility = View.GONE
+        reloadVideoGrid()
         invalidateOptionsMenu()
+    }
+
+    private fun reloadVideoGrid() {
+        val folder = currentFolder ?: return
+        folderVideos = videosFor(folder.path)
+        videoGrid.numColumns = viewMode.columns
+        videoGrid.adapter = VideoAdapter(this, folderVideos, viewMode)
+    }
+
+    private fun createShortcut() {
+        val folder = currentFolder
+        val label = folder?.name ?: getString(R.string.navigation_standard_directory_video)
+        val shortcut = ShortcutInfoCompat.Builder(this, "video_library:${folder?.path.orEmpty()}")
+            .setShortLabel(label)
+            .setIntent(createViewIntent(this, folder?.path))
+            .setIcon(IconCompat.createWithResource(this, R.mipmap.directory_shortcut_icon))
+            .build()
+        ShortcutManagerCompat.requestPinShortcut(this, shortcut, null)
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
+            Toast.makeText(this, R.string.shortcut_created, Toast.LENGTH_SHORT).show()
+        }
     }
 
     private fun queryVideos(): List<VideoEntry> {
@@ -252,12 +420,17 @@ class VideoLibraryActivity : AppActivity() {
     }
 
     private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
-}
 
-private fun buildFolders(byFolder: Map<String, List<VideoEntry>>): List<FolderEntry> =
-    byFolder.map { (path, videos) ->
-        FolderEntry(path, path.substringAfterLast('/'), videos.size)
-    }.sortedBy { it.name.lowercase() }
+    companion object {
+        private const val EXTRA_FOLDER = "me.zhanghai.android.files.videolibrary.extra.FOLDER"
+
+        // Used by home screen shortcuts: opens the library, or one folder of it directly.
+        fun createViewIntent(context: Context, folderPath: String?): Intent =
+            Intent(context, VideoLibraryActivity::class.java)
+                .setAction(Intent.ACTION_VIEW)
+                .putExtra(EXTRA_FOLDER, folderPath)
+    }
+}
 
 private class VideoEntry(
     val path: Path,
