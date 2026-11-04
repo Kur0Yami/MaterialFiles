@@ -71,6 +71,7 @@ import me.zhanghai.android.files.file.extension
 import me.zhanghai.android.files.file.fileProviderUri
 import me.zhanghai.android.files.file.isApk
 import me.zhanghai.android.files.file.isImage
+import me.zhanghai.android.files.file.isVideo
 import me.zhanghai.android.files.filejob.FileJobService
 import me.zhanghai.android.files.filelist.FileSortOptions.By
 import me.zhanghai.android.files.filelist.FileSortOptions.Order
@@ -131,6 +132,7 @@ import me.zhanghai.android.files.util.valueCompat
 import me.zhanghai.android.files.util.viewModels
 import me.zhanghai.android.files.util.withChooser
 import me.zhanghai.android.files.viewer.image.ImageViewerActivity
+import me.zhanghai.android.files.viewer.video.VideoPlayerActivity
 
 class FileListFragment : Fragment(), BreadcrumbLayout.Listener, FileListAdapter.Listener,
     ConfirmReplaceFileDialogFragment.Listener, OpenApkDialogFragment.Listener,
@@ -1404,6 +1406,7 @@ class FileListFragment : Fragment(), BreadcrumbLayout.Listener, FileListAdapter.
                 .apply {
                     extraPath = path
                     maybeAddImageViewerActivityExtras(this, path, mimeType)
+                    maybeAddVideoPlayerActivityExtras(this, path, mimeType)
                 }
                 .let {
                     if (withChooser) {
@@ -1446,6 +1449,33 @@ class FileListFragment : Fragment(), BreadcrumbLayout.Listener, FileListAdapter.
             position -= start
         }
         ImageViewerActivity.putExtras(intent, paths, position)
+    }
+
+    private fun maybeAddVideoPlayerActivityExtras(intent: Intent, path: Path, mimeType: MimeType) {
+        if (!mimeType.isVideo) {
+            return
+        }
+        var paths = mutableListOf<Path>()
+        // Use the ordered list from our adapter, so next/previous follows the on-screen order.
+        for (index in 0..<adapter.itemCount) {
+            val file = adapter.getItem(index)
+            val filePath = file.path
+            if (file.mimeType.isVideo || filePath == path) {
+                paths.add(filePath)
+            }
+        }
+        var position = paths.indexOf(path)
+        if (position == -1) {
+            return
+        }
+        // Avoid TransactionTooLargeException.
+        if (paths.size > IMAGE_VIEWER_ACTIVITY_PATH_LIST_SIZE_MAX) {
+            val start = (position - IMAGE_VIEWER_ACTIVITY_PATH_LIST_SIZE_MAX / 2)
+                .coerceIn(0, paths.size - IMAGE_VIEWER_ACTIVITY_PATH_LIST_SIZE_MAX)
+            paths = paths.subList(start, start + IMAGE_VIEWER_ACTIVITY_PATH_LIST_SIZE_MAX)
+            position -= start
+        }
+        VideoPlayerActivity.putExtras(intent, paths, position)
     }
 
     override fun cutFile(file: FileItem) {

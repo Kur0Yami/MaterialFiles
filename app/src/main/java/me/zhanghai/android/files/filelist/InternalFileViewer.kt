@@ -12,8 +12,10 @@ import me.zhanghai.android.files.BuildConfig
 import me.zhanghai.android.files.file.MimeType
 import me.zhanghai.android.files.file.intentType
 import me.zhanghai.android.files.file.isImage
+import me.zhanghai.android.files.file.isVideo
 import me.zhanghai.android.files.viewer.image.ImageViewerActivity
 import me.zhanghai.android.files.viewer.text.TextEditorActivity
+import me.zhanghai.android.files.viewer.video.VideoPlayerActivity
 
 private val ARCHIVE_MIME_TYPES = setOf(
         "application/gzip",
@@ -59,6 +61,7 @@ fun Intent.routeToInternalViewer(mimeType: MimeType): Intent {
     val type = mimeType.intentType
     val target = when {
         mimeType.isImage -> ImageViewerActivity::class.java
+        mimeType.isVideo -> VideoPlayerActivity::class.java
         type.startsWith("text/") || type in TEXT_MIME_TYPES -> TextEditorActivity::class.java
         type in ARCHIVE_MIME_TYPES -> FileListActivity::class.java
         else -> return this

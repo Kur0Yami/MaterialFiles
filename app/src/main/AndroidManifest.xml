@@ -276,6 +276,15 @@
             android:theme="@style/Theme.MaterialFiles.Immersive">
         </activity>
 
+        <activity
+            android:name="me.zhanghai.android.files.viewer.video.VideoPlayerActivity"
+            android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboardHidden|keyboard|navigation|uiMode"
+            android:exported="false"
+            android:label="@string/app_name"
+            android:resizeableActivity="true"
+            android:supportsPictureInPicture="true"
+            android:theme="@style/Theme.MaterialFiles.Immersive" />
+
         <service
             android:name="me.zhanghai.android.files.filejob.FileJobService"
             android:foregroundServiceType="specialUse">
