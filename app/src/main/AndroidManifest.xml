@@ -30,6 +30,7 @@
     <uses-permission
         android:name="android.permission.REQUEST_INSTALL_PACKAGES"
         tools:ignore="RequestInstallPackagesPolicy" />
+    <uses-permission android:name="android.permission.SET_WALLPAPER" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission
         android:name="android.permission.WRITE_EXTERNAL_STORAGE"
@@ -284,6 +285,12 @@
             android:resizeableActivity="true"
             android:supportsPictureInPicture="true"
             android:theme="@style/Theme.MaterialFiles.Immersive" />
+
+        <activity
+            android:name="me.zhanghai.android.files.filelist.NinePatchEditorActivity"
+            android:exported="false"
+            android:label="@string/app_name"
+            android:theme="@style/Theme.MaterialFiles" />
 
         <activity
             android:name="me.zhanghai.android.files.videolibrary.VideoLibraryActivity"

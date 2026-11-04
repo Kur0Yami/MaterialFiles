@@ -35,6 +35,7 @@ import me.zhanghai.android.files.file.fileSize
 import me.zhanghai.android.files.file.formatShort
 import me.zhanghai.android.files.file.iconRes
 import me.zhanghai.android.files.file.isApk
+import me.zhanghai.android.files.file.isImage
 import me.zhanghai.android.files.provider.archive.isArchivePath
 import me.zhanghai.android.files.provider.common.isEncrypted
 import me.zhanghai.android.files.settings.Settings
@@ -256,8 +257,11 @@ class FileListAdapter(
                     )
                 }
             }
-            popupMenu = PopupMenu(menuButton.context, menuButton)
-                .apply { inflate(R.menu.file_item) }
+            popupMenu = PopupMenu(menuButton.context, menuButton).apply {
+                inflate(R.menu.file_item)
+                menu.add(0, MENU_SET_WALLPAPER, 100, "Set as wallpaper")
+                menu.add(0, MENU_EDIT_NINE_PATCH, 101, "Edit 9-patch")
+            }
             menuButton.setOnClickListener { popupMenu.show() }
         }
     }
@@ -402,6 +406,9 @@ class FileListAdapter(
         menu.findItem(R.id.action_extract).isVisible = file.isArchiveFile
         menu.findItem(R.id.action_archive).isVisible = !isArchivePath
         menu.findItem(R.id.action_add_bookmark).isVisible = isDirectory
+        menu.findItem(MENU_SET_WALLPAPER).isVisible = !isDirectory && file.mimeType.isImage
+        menu.findItem(MENU_EDIT_NINE_PATCH).isVisible =
+            !isDirectory && file.name.endsWith(".png", ignoreCase = true)
         holder.popupMenu.setOnMenuItemClickListener {
             when (it.itemId) {
                 R.id.action_open_with -> {
@@ -452,6 +459,14 @@ class FileListAdapter(
                     listener.showPropertiesDialog(file)
                     true
                 }
+                MENU_SET_WALLPAPER -> {
+                    ImageToolActions.setWallpaper(holder.itemLayout.context, file.path)
+                    true
+                }
+                MENU_EDIT_NINE_PATCH -> {
+                    ImageToolActions.editNinePatch(holder.itemLayout.context, file.path)
+                    true
+                }
                 else -> false
             }
         }
@@ -472,6 +487,8 @@ class FileListAdapter(
         get() = Settings.FILE_LIST_ANIMATION.valueCompat
 
     companion object {
+        private const val MENU_SET_WALLPAPER = 0x6e01
+        private const val MENU_EDIT_NINE_PATCH = 0x6e02
         private val PAYLOAD_STATE_CHANGED = Any()
 
         private val CALLBACK = object : DiffUtil.ItemCallback<FileItem>() {
