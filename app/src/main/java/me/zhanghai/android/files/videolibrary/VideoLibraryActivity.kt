@@ -10,19 +10,23 @@ package me.zhanghai.android.files.videolibrary
 import android.content.Context
 import android.content.Intent
 import android.content.SharedPreferences
+import android.media.MediaScannerConnection
 import android.graphics.Color
 import android.graphics.Typeface
+import android.graphics.drawable.ColorDrawable
 import android.graphics.drawable.GradientDrawable
 import android.os.Build
 import android.os.Bundle
 import android.provider.MediaStore
 import android.text.TextUtils
 import android.text.format.DateUtils
+import android.view.ActionMode
 import android.view.Gravity
 import android.view.Menu
 import android.view.MenuItem
 import android.view.View
 import android.view.ViewGroup
+import android.widget.AbsListView
 import android.widget.BaseAdapter
 import android.widget.FrameLayout
 import android.widget.GridView
@@ -39,6 +43,7 @@ import androidx.appcompat.widget.SwitchCompat
 import androidx.appcompat.widget.Toolbar
 import androidx.core.content.pm.ShortcutInfoCompat
 import androidx.core.content.pm.ShortcutManagerCompat
+import androidx.core.graphics.ColorUtils
 import androidx.core.graphics.drawable.IconCompat
 import androidx.lifecycle.lifecycleScope
 import coil.dispose
@@ -110,6 +115,7 @@ class VideoLibraryActivity : AppActivity() {
     private var includeSubfolders = false
     private var showShortcut = false
     private var optionsDialog: AlertDialog? = null
+    private var actionMode: ActionMode? = null
 
     private var allVideos: List<VideoEntry> = emptyList()
     private var folders: List<FolderEntry> = emptyList()
@@ -143,7 +149,9 @@ class VideoLibraryActivity : AppActivity() {
             stretchMode = GridView.STRETCH_COLUMN_WIDTH
             setPadding(dp(8), dp(8), dp(8), dp(8))
             clipToPadding = false
-            setOnItemClickListener { _, _, position, _ -> openPlayer(position) }
+            choiceMode = AbsListView.CHOICE_MODE_MULTIPLE_MODAL
+            setMultiChoiceModeListener(SelectionCallback())
+            setOnItemClickListener { _, _, position, _ -> if (actionMode == null) openPlayer(position) }
         }
         emptyText = TextView(this).apply {
             text = getString(R.string.video_library_empty)
@@ -357,6 +365,7 @@ class VideoLibraryActivity : AppActivity() {
     }
 
     private fun showFolders() {
+        actionMode?.finish()
         currentFolder = null
         toolbar.title = getString(R.string.navigation_standard_directory_video)
         folderGrid.visibility = View.VISIBLE
@@ -379,7 +388,9 @@ class VideoLibraryActivity : AppActivity() {
         val folder = currentFolder ?: return
         folderVideos = videosFor(folder.path)
         videoGrid.numColumns = viewMode.columns
-        videoGrid.adapter = VideoAdapter(this, folderVideos, viewMode, playerPrefs)
+        videoGrid.adapter = VideoAdapter(this, folderVideos, viewMode, playerPrefs) { position ->
+            videoGrid.isItemChecked(position)
+        }
     }
 
     private fun createShortcut() {
@@ -445,10 +456,146 @@ class VideoLibraryActivity : AppActivity() {
         startActivity(intent)
     }
 
+    private inner class SelectionCallback : AbsListView.MultiChoiceModeListener {
+        override fun onItemCheckedStateChanged(
+            mode: ActionMode,
+            position: Int,
+            id: Long,
+            checked: Boolean
+        ) {
+            mode.title = "${videoGrid.checkedItemCount} dipilih"
+            (videoGrid.adapter as? BaseAdapter)?.notifyDataSetChanged()
+        }
+
+        override fun onCreateActionMode(mode: ActionMode, menu: Menu): Boolean {
+            actionMode = mode
+            menu.add(0, MENU_SEL_WATCHED, Menu.NONE, "Tandai sudah ditonton")
+                .setShowAsAction(MenuItem.SHOW_AS_ACTION_IF_ROOM)
+            menu.add(0, MENU_SEL_UNWATCHED, Menu.NONE, "Tandai belum ditonton")
+                .setShowAsAction(MenuItem.SHOW_AS_ACTION_NEVER)
+            menu.add(0, MENU_SEL_MOVE, Menu.NONE, "Pindah")
+                .setShowAsAction(MenuItem.SHOW_AS_ACTION_IF_ROOM)
+            menu.add(0, MENU_SEL_DELETE, Menu.NONE, "Hapus")
+                .setShowAsAction(MenuItem.SHOW_AS_ACTION_IF_ROOM)
+            return true
+        }
+
+        override fun onPrepareActionMode(mode: ActionMode, menu: Menu): Boolean = false
+
+        override fun onActionItemClicked(mode: ActionMode, item: MenuItem): Boolean {
+            val selected = selectedVideos()
+            if (selected.isEmpty()) return false
+            return when (item.itemId) {
+                MENU_SEL_WATCHED -> {
+                    setWatched(selected, true)
+                    mode.finish()
+                    true
+                }
+                MENU_SEL_UNWATCHED -> {
+                    setWatched(selected, false)
+                    mode.finish()
+                    true
+                }
+                MENU_SEL_MOVE -> {
+                    showMoveDialog(selected, mode)
+                    true
+                }
+                MENU_SEL_DELETE -> {
+                    showDeleteDialog(selected, mode)
+                    true
+                }
+                else -> false
+            }
+        }
+
+        override fun onDestroyActionMode(mode: ActionMode) {
+            actionMode = null
+        }
+    }
+
+    private fun selectedVideos(): List<VideoEntry> {
+        val positions = videoGrid.checkedItemPositions
+        return (0 until positions.size())
+            .filter { positions.valueAt(it) }
+            .map { folderVideos[positions.keyAt(it)] }
+    }
+
+    private fun setWatched(videos: List<VideoEntry>, watched: Boolean) {
+        val editor = playerPrefs.edit()
+        for (video in videos) {
+            editor.putBoolean(VideoPlayerActivity.watchedKey(video.mediaId), watched)
+            if (watched) {
+                editor.remove(video.mediaId)
+            }
+        }
+        editor.apply()
+        reloadVideoGrid()
+    }
+
+    private fun showDeleteDialog(videos: List<VideoEntry>, mode: ActionMode) {
+        AlertDialog.Builder(this)
+            .setTitle("Hapus ${videos.size} video?")
+            .setMessage("File video akan dihapus permanen dari penyimpanan.")
+            .setPositiveButton("Hapus") { _, _ ->
+                val deleted = videos.filter { video ->
+                    runCatching { Files.delete(video.path) }.isSuccess
+                }
+                finishSelection(mode, deleted, removed = true)
+            }
+            .setNegativeButton(android.R.string.cancel, null)
+            .show()
+    }
+
+    private fun showMoveDialog(videos: List<VideoEntry>, mode: ActionMode) {
+        // Tujuan hanya folder yang sudah ada di library.
+        val targets = folders.filter { folder -> videos.none { it.folder == folder.path } }
+        if (targets.isEmpty()) {
+            Toast.makeText(this, "Tidak ada folder tujuan lain", Toast.LENGTH_SHORT).show()
+            return
+        }
+        AlertDialog.Builder(this)
+            .setTitle("Pindah ${videos.size} video ke")
+            .setItems(targets.map { it.name }.toTypedArray()) { _, which ->
+                val directory = Paths.get(targets[which].path)
+                val moved = videos.filter { video ->
+                    runCatching {
+                        Files.move(video.path, directory.resolve(video.path.fileName.toString()))
+                    }.isSuccess
+                }
+                finishSelection(mode, moved, removed = false)
+            }
+            .setNegativeButton(android.R.string.cancel, null)
+            .show()
+    }
+
+    private fun finishSelection(mode: ActionMode, changed: List<VideoEntry>, removed: Boolean) {
+        mode.finish()
+        if (changed.isEmpty()) {
+            Toast.makeText(this, "Tidak ada video yang berhasil diproses", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val removedIds = if (removed) changed.map { it.mediaId }.toSet() else emptySet()
+        val paths = changed.map { it.path.toString() }.toTypedArray()
+        // Sinkronkan MediaStore dulu supaya daftar video ikut berubah.
+        MediaScannerConnection.scanFile(this, paths, null) { _, _ ->
+            lifecycleScope.launch {
+                allVideos = withContext(Dispatchers.IO) { queryVideos() }
+                    .filterNot { it.mediaId in removedIds }
+                refreshFolders()
+                reloadVideoGrid()
+            }
+        }
+    }
+
     private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
 
     companion object {
         private const val EXTRA_FOLDER = "me.zhanghai.android.files.videolibrary.extra.FOLDER"
+
+        private const val MENU_SEL_WATCHED = 101
+        private const val MENU_SEL_UNWATCHED = 102
+        private const val MENU_SEL_MOVE = 103
+        private const val MENU_SEL_DELETE = 104
 
         // Used by home screen shortcuts: opens the library, or one folder of it directly.
         fun createViewIntent(context: Context, folderPath: String?): Intent =
@@ -529,12 +676,15 @@ private class VideoAdapter(
     private val context: Context,
     private val videos: List<VideoEntry>,
     private val mode: VideoViewMode,
-    private val playerPrefs: SharedPreferences
+    private val playerPrefs: SharedPreferences,
+    private val isSelected: (Int) -> Boolean = { false }
 ) : BaseAdapter() {
     private val lastPlayedId = playerPrefs.getString(VideoPlayerActivity.KEY_LAST_PLAYED, null)
     private val colorDefault = context.getColorByAttr(android.R.attr.textColorPrimary)
     private val colorWatched = context.getColorByAttr(android.R.attr.textColorSecondary)
     private val colorLastPlayed = context.getColorByAttr(androidx.appcompat.R.attr.colorPrimary)
+    private val colorSelected =
+        ColorUtils.setAlphaComponent(context.getColorByAttr(androidx.appcompat.R.attr.colorPrimary), 72)
 
     override fun getCount(): Int = videos.size
 
@@ -545,10 +695,12 @@ private class VideoAdapter(
     override fun getView(position: Int, convertView: View?, parent: ViewGroup?): View {
         val video = videos[position]
         // Reuse only views built for this mode (the tag records the mode).
-        return when (mode) {
+        val view = when (mode) {
             VideoViewMode.COMPACT -> bindCompact(convertView, video)
             VideoViewMode.GRID, VideoViewMode.GALLERY -> bindTile(convertView, video)
         }
+        view.foreground = if (isSelected(position)) ColorDrawable(colorSelected) else null
+        return view
     }
 
     private fun isWatched(video: VideoEntry): Boolean =

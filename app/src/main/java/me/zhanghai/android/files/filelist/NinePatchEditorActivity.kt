@@ -20,6 +20,14 @@ import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.SeekBar
 import android.widget.TextView
+import android.view.Menu
+import android.view.MenuItem
+import com.google.android.material.appbar.MaterialToolbar
+import com.google.android.material.button.MaterialButton
+import com.google.android.material.button.MaterialButtonToggleGroup
+import com.google.android.material.color.MaterialColors
+import com.google.android.material.dialog.MaterialAlertDialogBuilder
+import kotlin.math.roundToInt
 import androidx.appcompat.app.AlertDialog
 import java8.nio.file.Path
 import me.zhanghai.android.files.app.AppActivity
@@ -41,12 +49,17 @@ import kotlin.math.min
  * A plain PNG gets a border added and is saved as "<name>.9.png".
  */
 class NinePatchEditorActivity : AppActivity() {
+    private companion object {
+        const val MENU_SAVE_ID = 1
+        const val MENU_UNDO_ID = 2
+    }
+
     private lateinit var sourcePath: Path
     private var isNinePatchSource = false
     private lateinit var editor: NinePatchEditorView
-    private lateinit var titleText: TextView
-    private val modeButtons = ArrayList<Button>()
-    private lateinit var eraseButton: Button
+    private lateinit var toolbar: MaterialToolbar
+    private lateinit var modeGroup: MaterialButtonToggleGroup
+    private lateinit var eraseButton: MaterialButton
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -58,7 +71,7 @@ class NinePatchEditorActivity : AppActivity() {
         sourcePath = path
         isNinePatchSource = path.fileName.toString().endsWith(".9.png", ignoreCase = true)
         buildUi()
-        titleText.text = path.fileName.toString()
+        toolbar.title = path.fileName.toString()
         thread {
             val bitmap = try {
                 path.newInputStream().use { BitmapFactory.decodeStream(it) }
@@ -79,69 +92,99 @@ class NinePatchEditorActivity : AppActivity() {
     private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
 
     private fun buildUi() {
+        val surface = MaterialColors.getColor(this, com.google.android.material.R.attr.colorSurface, Color.WHITE)
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             fitsSystemWindows = true
+            setBackgroundColor(surface)
         }
-        val bar = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(16), dp(4), dp(8), dp(4))
+        toolbar = MaterialToolbar(this).apply {
+            setBackgroundColor(surface)
+            setNavigationIcon(androidx.appcompat.R.drawable.abc_ic_ab_back_material)
+            setNavigationOnClickListener { finish() }
+            menu.add(0, MENU_UNDO_ID, Menu.NONE, "Undo")
+                .setShowAsAction(MenuItem.SHOW_AS_ACTION_IF_ROOM)
+            menu.add(0, MENU_SAVE_ID, Menu.NONE, "Save")
+                .setShowAsAction(MenuItem.SHOW_AS_ACTION_ALWAYS)
+            setOnMenuItemClickListener { item ->
+                when (item.itemId) {
+                    MENU_SAVE_ID -> save()
+                    MENU_UNDO_ID -> if (!editor.undo()) showToast("Nothing to undo")
+                }
+                true
+            }
         }
-        titleText = TextView(this).apply {
-            textSize = 16f
-            maxLines = 1
-            ellipsize = TextUtils.TruncateAt.END
-        }
-        bar.addView(titleText, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-        bar.addView(Button(this).apply {
-            text = "Save"
-            setOnClickListener { save() }
-        })
-        root.addView(bar)
+        root.addView(toolbar, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
         root.addView(TextView(this).apply {
             text = "Pick Horizontal / Vertical / Padding, then drag on the image. Erase removes. Two fingers: pan/zoom."
-            textSize = 12f
+            textSize = 13f
             alpha = 0.7f
-            setPadding(dp(16), 0, dp(16), dp(4))
+            setPadding(dp(16), dp(4), dp(16), dp(8))
         })
         editor = NinePatchEditorView(this)
         root.addView(editor, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
-        fun newRow(): LinearLayout = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            setPadding(dp(8), 0, dp(8), 0)
+
+        val controls = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(12), dp(8), dp(12), dp(12))
         }
-        fun tool(row: LinearLayout, label: String, onClick: () -> Unit): Button = Button(this).apply {
-            text = label
-            isAllCaps = false
-            setOnClickListener { onClick() }
-            row.addView(
-                this, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+        modeGroup = MaterialButtonToggleGroup(this).apply {
+            isSingleSelection = true
+            isSelectionRequired = true
+        }
+        listOf("Horizontal", "Vertical", "Padding").forEach { label ->
+            modeGroup.addView(
+                MaterialButton(this, null, com.google.android.material.R.attr.materialButtonOutlinedStyle).apply {
+                    id = View.generateViewId()
+                    text = label
+                    isAllCaps = false
+                }
             )
         }
-        val row1 = newRow()
-        modeButtons.add(tool(row1, "Horizontal") { setMode(0) })
-        modeButtons.add(tool(row1, "Vertical") { setMode(1) })
-        modeButtons.add(tool(row1, "Padding") { setMode(2) })
-        val row2 = newRow()
-        eraseButton = tool(row2, "Erase: off") { toggleErase() }
-        tool(row2, "Preview") { showPreview() }
-        tool(row2, "Clear") { editor.clearMarks() }
-        setMode(0)
-        root.addView(row1)
-        root.addView(row2)
+        modeGroup.addOnButtonCheckedListener { _, checkedId, isChecked ->
+            if (isChecked) {
+                setMode(modeGroup.indexOfChild(modeGroup.findViewById<View>(checkedId)))
+            }
+        }
+        controls.addView(modeGroup, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+
+        val actions = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            setPadding(0, dp(8), 0, 0)
+        }
+        fun action(label: String, onClick: () -> Unit): MaterialButton =
+            MaterialButton(this, null, com.google.android.material.R.attr.materialButtonOutlinedStyle).apply {
+                text = label
+                isAllCaps = false
+                maxLines = 1
+                textSize = 13f
+                setPadding(dp(2), 0, dp(2), 0)
+                setOnClickListener { onClick() }
+                actions.addView(
+                    this,
+                    LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply {
+                        setMargins(dp(4), 0, dp(4), 0)
+                    }
+                )
+            }
+        eraseButton = action("Erase") { toggleErase() }
+        eraseButton.isCheckable = true
+        action("Preview") { showPreview() }
+        action("Fit") { editor.resetView() }
+        action("Clear") { editor.clearMarks() }
+        controls.addView(actions, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+
+        root.addView(controls, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
         setContentView(root)
+        modeGroup.check(modeGroup.getChildAt(0).id)
     }
 
     private fun setMode(mode: Int) {
         editor.mode = mode
-        modeButtons.forEachIndexed { index, button -> button.alpha = if (index == mode) 1f else 0.5f }
     }
 
     private fun toggleErase() {
-        editor.erase = !editor.erase
-        eraseButton.text = if (editor.erase) "Erase: on" else "Erase: off"
-        eraseButton.alpha = if (editor.erase) 1f else 0.7f
+        editor.erase = eraseButton.isChecked
     }
 
     private fun save() {
@@ -153,7 +196,7 @@ class NinePatchEditorActivity : AppActivity() {
                 runOnUiThread {
                     sourcePath = target
                     isNinePatchSource = true
-                    titleText.text = target.fileName.toString()
+                    toolbar.title = target.fileName.toString()
                 }
                 "Saved " + target.fileName
             } catch (e: Exception) {
@@ -186,16 +229,25 @@ class NinePatchEditorActivity : AppActivity() {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(16), dp(8), dp(16), 0)
         }
+        val boxWidth = max(dp(160), resources.displayMetrics.widthPixels - dp(120))
+        val boxHeight = dp(280)
         val stage = FrameLayout(this)
         val target = View(this).apply { background = drawable }
-        stage.addView(target, FrameLayout.LayoutParams(content.first, content.second, Gravity.CENTER))
-        container.addView(stage, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(260)))
-        fun resize(widthProgress: Int?, heightProgress: Int?) {
-            val lp = target.layoutParams
-            if (widthProgress != null) lp.width = max(1, (content.first * (0.5f + 3.5f * widthProgress / 100f)).toInt())
-            if (heightProgress != null) lp.height = max(1, (content.second * (0.5f + 3.5f * heightProgress / 100f)).toInt())
+        stage.addView(target, FrameLayout.LayoutParams(1, 1, Gravity.CENTER))
+        container.addView(stage, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, boxHeight))
+        var widthFactor = 0.5f + 3.5f * 14 / 100f
+        var heightFactor = widthFactor
+        // Ukuran preview dikecilkan sampai seluruh gambar terlihat di dalam kotak.
+        fun resize() {
+            val w = content.first * widthFactor
+            val h = content.second * heightFactor
+            val fit = min(boxWidth / w, boxHeight / h)
+            val lp = target.layoutParams as FrameLayout.LayoutParams
+            lp.width = max(1, (w * fit).toInt())
+            lp.height = max(1, (h * fit).toInt())
             target.layoutParams = lp
         }
+        resize()
         fun slider(label: String, onChange: (Int) -> Unit) {
             container.addView(TextView(this).apply { text = label; textSize = 12f })
             container.addView(SeekBar(this).apply {
@@ -208,9 +260,9 @@ class NinePatchEditorActivity : AppActivity() {
                 })
             })
         }
-        slider("Width") { resize(it, null) }
-        slider("Height") { resize(null, it) }
-        AlertDialog.Builder(this)
+        slider("Width") { widthFactor = 0.5f + 3.5f * it / 100f; resize() }
+        slider("Height") { heightFactor = 0.5f + 3.5f * it / 100f; resize() }
+        MaterialAlertDialogBuilder(this)
             .setTitle("Preview")
             .setView(container)
             .setPositiveButton(android.R.string.ok, null)
@@ -247,6 +299,12 @@ private class NinePatchEditorView(context: Context) : View(context) {
     private var panning = false
     private var lastFocusX = 0f
     private var lastFocusY = 0f
+    private val undoStack = ArrayList<Array<BooleanArray>>()
+    private var edgeDrag = false
+    private var edgeBoundary = 0
+    private var edgePos = 0
+    private var edgeBase = BooleanArray(0)
+    private var edgeBefore: Array<BooleanArray> = arrayOf()
     private val scaleDetector = android.view.ScaleGestureDetector(
         context,
         object : android.view.ScaleGestureDetector.SimpleOnScaleGestureListener() {
@@ -281,6 +339,7 @@ private class NinePatchEditorView(context: Context) : View(context) {
         }
         inner.density = Bitmap.DENSITY_NONE
         content = inner
+        undoStack.clear()
         fitted = false
         fit()
         invalidate()
@@ -289,6 +348,7 @@ private class NinePatchEditorView(context: Context) : View(context) {
     fun contentSize(): Pair<Int, Int> = Pair(content?.width ?: 1, content?.height ?: 1)
 
     fun clearMarks() {
+        pushUndo()
         top.fill(false)
         bottom.fill(false)
         left.fill(false)
@@ -306,8 +366,8 @@ private class NinePatchEditorView(context: Context) : View(context) {
             (width - 2 * margin) / (bitmap.width + 2),
             (height - 2 * margin) / (bitmap.height + 2)
         )
-        scale = max(1f, s)
-        minScale = max(1f, min(scale, 1f))
+        scale = max(0.05f, s)
+        minScale = scale * 0.5f
         tx = (width - (bitmap.width + 2) * scale) / 2f
         ty = (height - (bitmap.height + 2) * scale) / 2f
         fitted = true
@@ -475,20 +535,46 @@ private class NinePatchEditorView(context: Context) : View(context) {
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
                 parent?.requestDisallowInterceptTouchEvent(true)
-                dragging = true
-                dragX0 = contentX(event.x)
-                dragY0 = contentY(event.y)
-                dragX1 = dragX0
-                dragY1 = dragY0
+                val active = activeMarks()
+                val pos = if (mode == 1) contentY(event.y) else contentX(event.x)
+                val boundary = active?.let { nearestBoundary(it, pos) }
+                if (active != null && boundary != null) {
+                    edgeDrag = true
+                    edgeBoundary = boundary
+                    edgePos = boundary
+                    edgeBase = active.copyOf()
+                    edgeBefore = snapshot()
+                } else {
+                    dragging = true
+                    dragX0 = contentX(event.x)
+                    dragY0 = contentY(event.y)
+                    dragX1 = dragX0
+                    dragY1 = dragY0
+                }
                 invalidate()
             }
-            MotionEvent.ACTION_MOVE -> if (dragging) {
-                dragX1 = contentX(event.x)
-                dragY1 = contentY(event.y)
-                invalidate()
+            MotionEvent.ACTION_MOVE -> {
+                if (edgeDrag) {
+                    val active = activeMarks()
+                    if (active != null) {
+                        val pos = if (mode == 1) contentY(event.y) else contentX(event.x)
+                        edgePos = pos.roundToInt().coerceIn(0, active.size)
+                        applyEdge(active, edgeBase, edgeBoundary, edgePos)
+                    }
+                    invalidate()
+                } else if (dragging) {
+                    dragX1 = contentX(event.x)
+                    dragY1 = contentY(event.y)
+                    invalidate()
+                }
             }
             MotionEvent.ACTION_UP -> {
-                if (dragging) {
+                if (edgeDrag) {
+                    if (edgePos != edgeBoundary) {
+                        pushUndo(edgeBefore)
+                    }
+                    edgeDrag = false
+                } else if (dragging) {
                     dragX1 = contentX(event.x)
                     dragY1 = contentY(event.y)
                     commitDrag()
@@ -497,6 +583,10 @@ private class NinePatchEditorView(context: Context) : View(context) {
                 invalidate()
             }
             MotionEvent.ACTION_CANCEL -> {
+                if (edgeDrag) {
+                    restore(edgeBefore)
+                    edgeDrag = false
+                }
                 dragging = false
                 invalidate()
             }
@@ -504,8 +594,81 @@ private class NinePatchEditorView(context: Context) : View(context) {
         return true
     }
 
+    private fun snapshot(): Array<BooleanArray> =
+        arrayOf(top.copyOf(), bottom.copyOf(), left.copyOf(), right.copyOf())
+
+    private fun restore(state: Array<BooleanArray>) {
+        top = state[0].copyOf()
+        bottom = state[1].copyOf()
+        left = state[2].copyOf()
+        right = state[3].copyOf()
+    }
+
+    private fun pushUndo(state: Array<BooleanArray> = snapshot()) {
+        undoStack.add(state)
+        if (undoStack.size > 50) {
+            undoStack.removeAt(0)
+        }
+    }
+
+    fun undo(): Boolean {
+        if (undoStack.isEmpty()) {
+            return false
+        }
+        restore(undoStack.removeAt(undoStack.size - 1))
+        invalidate()
+        return true
+    }
+
+    fun resetView() {
+        fitted = false
+        fit()
+        invalidate()
+    }
+
+    // Marker line for the current mode: top for horizontal, left for vertical, none for padding.
+    private fun activeMarks(): BooleanArray? = when (mode) {
+        0 -> top
+        1 -> left
+        else -> null
+    }
+
+    // Finds the closest stretch edge (a place where marked and unmarked meet) near pos, within ~16dp.
+    private fun nearestBoundary(arr: BooleanArray, pos: Float): Int? {
+        val tolerance = 16 * density / scale
+        var best: Int? = null
+        var bestDist = Float.MAX_VALUE
+        for (b in 0..arr.size) {
+            val leftMarked = b > 0 && arr[b - 1]
+            val rightMarked = b < arr.size && arr[b]
+            if (leftMarked == rightMarked) {
+                continue
+            }
+            val dist = Math.abs(b - pos)
+            if (dist < bestDist) {
+                bestDist = dist
+                best = b
+            }
+        }
+        return if (bestDist <= tolerance) best else null
+    }
+
+    // Moves edge b to p. Cells between b and p take the value of the neighbour that stays,
+    // so dragging a stretch edge grows or shrinks the marked run.
+    private fun applyEdge(active: BooleanArray, base: BooleanArray, b: Int, p: Int) {
+        base.copyInto(active)
+        if (p > b) {
+            val value = b - 1 >= 0 && base[b - 1]
+            for (i in b until p) active[i] = value
+        } else if (p < b) {
+            val value = b < base.size && base[b]
+            for (i in p until b) active[i] = value
+        }
+    }
+
     // Turns the dragged span/rectangle (in image pixels) into marks.
     private fun commitDrag() {
+        pushUndo()
         val bitmap = content ?: return
         val w = bitmap.width
         val h = bitmap.height
