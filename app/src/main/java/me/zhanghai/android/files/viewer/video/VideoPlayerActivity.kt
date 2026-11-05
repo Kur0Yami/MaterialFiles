@@ -208,6 +208,7 @@ class VideoPlayerActivity : AppActivity() {
     private var startingY = 0f
     private var startVolumePercent = 0
     private var startBrightnessPercent = 0
+    private var itemDurationMs = 0L
     private var activeVertical = 0 // 0 none, 1 volume, 2 brightness
     private lateinit var gestureDetector: GestureDetector
     private lateinit var scaleDetector: ScaleGestureDetector
@@ -1802,13 +1803,18 @@ class VideoPlayerActivity : AppActivity() {
 
     // endregion
 
+    /** Dianggap sudah ditonton kalau sudah 90% atau sisa durasi sudah masuk ending (3 menit terakhir). */
+    private fun isNearlyFinished(position: Long, duration: Long): Boolean {
+        if (duration <= 0L) return false
+        return position >= duration * 9 / 10 || duration - position <= 3 * 60_000L
+    }
+
     private fun savePosition() {
         val p = player ?: return
         val item = p.currentMediaItem ?: return
         val duration = if (p.duration == C.TIME_UNSET || p.duration < 0) 0L else p.duration
         val position = p.currentPosition
-        val finished = p.playbackState == Player.STATE_ENDED ||
-            (duration > 0 && position > duration - 10_000L)
+        val finished = p.playbackState == Player.STATE_ENDED || isNearlyFinished(position, duration)
         if (finished) {
             prefs.edit().remove(item.mediaId).putBoolean(watchedKey(item.mediaId), true).apply()
         } else if (position < 5_000L) {
@@ -1830,6 +1836,9 @@ class VideoPlayerActivity : AppActivity() {
 
         override fun onPlaybackStateChanged(playbackState: Int) {
             updateButtons()
+            if (playbackState == Player.STATE_READY) {
+                itemDurationMs = player?.duration?.takeIf { it > 0L } ?: 0L
+            }
             if (playbackState == Player.STATE_ENDED) {
                 setControlsVisible(true)
                 handler.removeCallbacks(hideControlsRunnable)
@@ -1857,10 +1866,12 @@ class VideoPlayerActivity : AppActivity() {
             newPosition: Player.PositionInfo,
             reason: Int
         ) {
-            if (reason == Player.DISCONTINUITY_REASON_AUTO_TRANSITION) {
-                oldPosition.mediaItem?.mediaId?.let {
-                    prefs.edit().remove(it).putBoolean(watchedKey(it), true).apply()
-                }
+            val oldId = oldPosition.mediaItem?.mediaId ?: return
+            val itemChanged = newPosition.mediaItem?.mediaId != oldId
+            val ended = reason == Player.DISCONTINUITY_REASON_AUTO_TRANSITION
+            // Tombol next/skip manual juga dihitung, selama episode sudah sampai ending.
+            if (ended || (itemChanged && isNearlyFinished(oldPosition.positionMs, itemDurationMs))) {
+                prefs.edit().remove(oldId).putBoolean(watchedKey(oldId), true).apply()
             }
         }
 
